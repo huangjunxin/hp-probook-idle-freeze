@@ -1,6 +1,11 @@
 ﻿<#
-  fix-idle-hang.ps1  —  HP ProBook 4 G1i 14 空闲卡死 缓解工具
-  目标：关闭 PCIe 链接状态电源管理（ASPM），这是目前唯一有同型号实证的缓解手段。
+  fix-idle-hang.ps1  —  HP ProBook 4 G1i 14 空闲卡死「诊断」工具
+  目标：检查/设置 PCIe 链接状态电源管理（ASPM）与快速启动。
+
+  ⚠️ 2026-10-28 实测更新：这条措施在本机【无效】。
+     ASPM 已关闭并回读确认 0x0 / 0x0（AC + DC），4 小时 4 分钟后（14:12）仍然冻死，为第 18 次。
+     保留本脚本的用途是：① 帮你排除这个变量  ② 随时回读当前档位。
+     不要指望 apply 之后问题就消失 —— 详见 docs/troubleshooting-log.md 第 8 轮。
 
   用法（必须以管理员身份运行，在仓库根目录执行）：
       powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 status
