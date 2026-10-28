@@ -11,7 +11,7 @@
 > `ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死（亮屏）；1 小时 26 分钟后再崩一次，这次是从**待机**（`Type 1`、`CS = true`）进去的；又过 36 分钟第三次，**黑屏状态下按键盘，整机自己复位**（既没蓝屏也没长按电源键）。
 > 三次的 `Type`、`Duration`、是否待机、连「怎么死的」全都不同，**只有 `ActivityLevel 4` 没变**——失效瞬间连电池读数都归了零。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 37 条踩坑记录**——帮你少走这四个月的弯路。
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 38 条踩坑记录**——帮你少走这四个月的弯路。
 >
 > ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 37 documented pitfalls**.*
 
@@ -32,6 +32,8 @@
 
 **症状**：CPU 请求深空闲态时整机冻死——屏幕亮着、没开任何程序、功耗只有 4 W 的时候一样会冻。  
 **规模**：2026-07-08 至 2026-10-28 共 **21 次**无蓝屏硬断电，横跨 3 个 BIOS 版本，其中 **7 次发生在完全没待机的时候**（14 次在连接待机中）。
+
+**暴露量（这个数字比日历时间重要得多）**：这三个月里机器**真正开着的只有 31 天**，其余是关机。31 个在用日中 12 天出过 `41`；而**最长的无故障纪录是连续 16 个在用日、443 次进入连接待机、零崩溃**（`08-27 → 09-22`）。故障呈**发作期**式分布——三段爆发期之间夹着这段 16 天的干净期。**所以「一晚上没崩」在这个样本里没有任何统计分量**，详见 `docs/troubleshooting-log.md` 的 P38。
 
 **两种表现**：大多数时候是「画面定格、键鼠无响应、必须长按电源键」（第 1～20 次）；但 2026-10-28 17:17 那一次是「黑屏 → 按键盘 → 整机自行复位」，既没蓝屏也没长按电源键。**别看现象，看 `Kernel-Power 41` 的字段**：`BugcheckCode = 0`、无 dump、`LongPowerButtonPressDetected = false`，三条对上就是同一个病。
 
@@ -259,7 +261,7 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
 | `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：九轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、37 条踩坑<br />**Core doc** — nine rounds of hypotheses and what disproved each, capability limits of 9 data sources, 37 pitfalls |
+| `docs/troubleshooting-log.md`           | **核心文档**：九轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、38 条踩坑<br />**Core doc** — nine rounds of hypotheses and what disproved each, capability limits of 9 data sources, 38 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 21 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |
