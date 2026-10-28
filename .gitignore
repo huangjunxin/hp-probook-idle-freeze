@@ -1,0 +1,30 @@
+# ---- 私有 / 本地数据，绝不入库 ----
+
+# WorkBuddy 项目数据与记忆
+.workbuddy/
+
+# 未脱敏的原始取证材料（含 Windows 用户名、用户目录路径、计算机名、电池序列号）。
+# 解释见 private/README.md；只放行目录内的说明文件。
+/private/*
+!/private/README.md
+
+# 兜底：万一报告被误放到仓库根目录
+/sleepstudy-report*.html
+
+# 电源方案备份（powercfg /export 产物）
+*.pow
+
+
+# ---- Windows ----
+
+Thumbs.db
+desktop.ini
+*.lnk
+~$*
+
+
+# ---- 编辑器 ----
+
+.vscode/
+.idea/
+*.swp

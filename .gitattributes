@@ -1,0 +1,14 @@
+# 统一换行符：避免 Windows / Linux 用户互相克隆后脚本跑不起来
+* text=auto
+
+# PowerShell 脚本一律 CRLF（LF 的 .ps1 在部分环境下会报错）
+*.ps1 text eol=crlf
+
+# 文档与网页用 LF
+*.md   text eol=lf
+*.html text eol=lf
+
+# 二进制
+*.pow binary
+*.png binary
+*.jpg binary
