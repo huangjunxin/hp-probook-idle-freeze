@@ -547,11 +547,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 ### 6.1.3 观察基线（判定依据）
 
-| 指标                     | 基线值（10-28 17:20，第 21 次之后、摘 hypervisor 之前） |
+| 指标                     | 基线值（10-28 17:35，BIOS 关掉深度空闲态之后） |
 | ---------------------- | ----------------------------- |
 | `Kernel-Power 41` 历史总数 | **21**                        |
 | 最近一次异常断电（记录时刻）         | **2026-10-28 17:17:46**       |
 | 最早一次                   | **2026-07-08 11:12:26**       |
+
+> **第 10 轮干预已于 2026-10-28 17:35:27 生效**：BIOS 里 `Extended Idle Power States` 设为 `Disable`（本机 `X72 01.05.04`）。这是目前唯一直接限制 package C-state 深度的开关，正对 `ActivityLevel 4` 这个唯一不变量。**从这一刻起计时，判负口径不变。**
 
 **判定标准：「最近一次异常断电」时间戳是否仍停在 `10-28 17:17:46`。** 只看这一个数，观察 3–5 天。
 
@@ -575,13 +577,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 0 | BIOS 升级到 `X72 01.05.04`（HP 当前最新）                                                                                    | ❌ **已证伪**（刷后 58 分钟即复现）                                                    |
 | 1 | `fix-idle-hang.ps1 apply` → ASPM 设为「关闭」（AC+DC）                                                                    | ❌ **已证伪**（10-28 10:08 关闭并验证 `0x0/0x0`，14:12 第 18 次冻死）                 |
 | 2 | 关闭内存完整性（HVCI），重启观察                                                                                              | ❌ **已证伪**（14:22 关闭重启，`Enabled = 0` 回读确认，15:14 第 19 次冻死）            |
-| 3 | `disable-hypervisor.ps1 apply` → **同时**关 VBS 注册表开关与 `hypervisorlaunchtype`，重启观察                          | ⏳ **当前步骤（尚未真正执行）**：第一次只关了 `bcdedit`，被 VBS 架空（P34）；重启后须看到 `HypervisorPresent = False` 才算数。代价：WSL2 / Docker / 虚拟机 / Credential Guard 全部失效  |
-| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | 待试（**直接限制 package C-state 深度**，比第 3 步更贴靶心，但不动虚拟化的话可优先）                  |
+| 3 | `disable-hypervisor.ps1 apply` → **同时**关 VBS 注册表开关与 `hypervisorlaunchtype`，重启观察                          | ⏸️ **暂缓，被第 4 步抢先**：第一次只关了 `bcdedit`，被 VBS 架空（P34），升级后的 `apply` 从未执行。第 4 步更贴靶心且不牺牲虚拟化，故先走第 4 步；第 4 步判负后再回来执行它  |
+| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | ⏳ **当前步骤（10-28 17:35:27 生效）**：BIOS `X72 01.05.04` 中已设 `Disable` 并重启。**直接限制 package C-state 深度**，代价是续航变差，不影响虚拟化 |
 | 5 | 报修（材料见 `warranty-claim.md`）                                                                                     | 材料已备，含第 19 次现场                                                          |
 
 **第 3、4 步为什么都指向 CPU 空闲路径**：崩溃栈顶部是 `intelppm!HvRequestIdle`，`Hv` = **Hypervisor**；本机 `Kernel-Processor-Power` 事件 55 又显示空闲状态由 **Micro Power Engine Plugin（11 个状态）** 管理——正是栈里 `PepIdleExecute` 那一层。ASPM 和 HVCI 被排除之后，只剩这条链。
 
-**如果只能选一个**：第 4 步比第 3 步更贴靶心（直接砍掉最深 package C-state），代价是续航变差而不是废掉虚拟化。第 3 步胜在一条命令、可逆。
+**如果只能选一个**：第 4 步比第 3 步更贴靶心（直接砍掉最深 package C-state），代价是续航变差而不是废掉虚拟化。第 3 步胜在一条命令、可逆。**实际选择：先走第 4 步**（10-28 17:35 已生效）。
 
 ### 6.3 已回退 / 已废弃
 
