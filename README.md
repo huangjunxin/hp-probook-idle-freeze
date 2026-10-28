@@ -1,7 +1,10 @@
-# Dead-Sleep
+# HP ProBook 4 G1i 14 — Freezes Solid When Idle, No BSOD, No Dump
 
-**HP ProBook 4 G1i 14 freezes solid when idle — no BSOD, no dump. Full investigation & mitigation.**  
-**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录，以及被验证过的缓解方案。**
+**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录，以及被验证过的缓解方案。**  
+*A real-machine investigation into a Windows 11 idle hard-freeze — seven rounds of hypotheses, and the one mitigation that actually held.*
+
+> **关于「死亡睡眠」这个代号 / On the name.** 我们一开始把这个故障叫作 **Dead Sleep（死亡睡眠）**，查到最后发现**叫错了**——它跟睡眠没有因果关系。名字留在这里只当个纪念。  
+> *We called this bug "dead sleep" at first. That turned out to be a misdiagnosis — the freeze was never caused by sleep. The name is kept here as a memento only.*
 
 > **English TL;DR**
 >
@@ -15,8 +18,8 @@
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
-不是「睡眠睡死了」，是 **CPU 请求深空闲态时整机冻死**——屏幕亮着、没开任何程序、功耗 4 W 的时候一样会冻。  
-2026-07-08 至 2026-10-28 共 **17 次**无蓝屏硬断电，横跨 3 个 BIOS 版本，其中 **5 次发生在完全没待机的时候**。
+**症状**：CPU 请求深空闲态时整机冻死——屏幕亮着、没开任何程序、功耗只有 4 W 的时候一样会冻。  
+**规模**：2026-07-08 至 2026-10-28 共 **17 次**无蓝屏硬断电，横跨 3 个 BIOS 版本，其中 **5 次发生在完全没待机的时候**。
 
 ---
 

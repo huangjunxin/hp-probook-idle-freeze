@@ -1,6 +1,8 @@
-# 「死亡睡眠」排查全过程与踩坑记录
+# 「空闲冻死」排查全过程与踩坑记录
 
 > **Troubleshooting log** — HP ProBook 4 G1i 14 hard-freezes at idle. 17 × `Kernel-Power 41` with `BugcheckCode = 0`, 3 BIOS versions, 5 events outside Modern Standby. Working hypothesis: PCIe ASPM. Written in Chinese; every command is copy-paste ready. For the short version, see the [README](../README.md).
+>
+> 本文件原名「死亡睡眠」，那是最初的错误结论；现已按实际机理改称「空闲冻死」。
 
 > **机器**：HP ProBook 4 G1i 14 inch Notebook AI PC（序列号已脱敏）  
 > **系统**：Windows 11 25H2，build `26200.9711`  
