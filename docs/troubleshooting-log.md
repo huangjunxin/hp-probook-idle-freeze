@@ -1,13 +1,13 @@
 # 「空闲冻死」排查全过程与踩坑记录
 
-> **Troubleshooting log** — HP ProBook 4 G1i 14 hard-freezes at idle. 18 × `Kernel-Power 41` with `BugcheckCode = 0`, 3 BIOS versions, 5 events outside Modern Standby. **No working fix found** (PCIe ASPM was tested and disproved). Written in Chinese; every command is copy-paste ready. For the short version, see the [README](../README.md).
+> **Troubleshooting log** — HP ProBook 4 G1i 14 hard-freezes at idle. 19 × `Kernel-Power 41` with `BugcheckCode = 0`, 3 BIOS versions, 6 events outside Modern Standby. **No working fix found** (BIOS, PCIe ASPM and HVCI all tested and disproved). Written in Chinese; every command is copy-paste ready. For the short version, see the [README](../README.md).
 >
 > 本文件原名「死亡睡眠」，那是最初的错误结论；现已按实际机理改称「空闲冻死」。
 
 > **机器**：HP ProBook 4 G1i 14 inch Notebook AI PC（序列号已脱敏）  
 > **系统**：Windows 11 25H2，build `26200.9711`  
 > **排查时间**：2026-10-27 ~ 2026-10-28  
-> **当前状态**：**无有效解**。ASPM 已于 10-28 10:08 关闭并验证 `0x0/0x0`，**14:12 第 18 次冻死，该假设证伪**；已转入第 8 轮（hypervisor 空闲路径），HVCI 于 14:22 关闭（判定口径见 §6.1.3）
+> **当前状态**：**无有效解，19 次**。BIOS 最新版、ASPM、HVCI 三项干预已全部证伪；第 19 次（10-28 15:14）首次留下崩溃前完整现场，指向 **CPU 深度空闲状态转换**。已转入第 9 轮：摘掉 hypervisor（判定口径见 §6.1.3）
 
 ---
 
@@ -15,9 +15,9 @@
 
 **这不是「睡眠睡死了」，是「一闲就死」。**
 
-系统只要进入空闲状态、CPU 请求深睡，整机就会冻住——**屏幕亮着、没开任何程序、包功耗 4 W 的时候一样会冻**。2026-07-08 至 2026-10-28 共 **18 次**无蓝屏硬断电，横跨 **3 个 BIOS 版本**，13 次发生在连接待机中、**5 次发生在完全没待机的时候**。
+系统只要进入空闲状态、CPU 请求深睡，整机就会冻住——**屏幕亮着、没开任何程序、包功耗 4 W 的时候一样会冻**。2026-07-08 至 2026-10-28 共 **19 次**无蓝屏硬断电，横跨 **3 个 BIOS 版本**，13 次发生在连接待机中、**6 次发生在完全没待机的时候**。
 
-**当前状态：没有找到有效解。** 第 7 轮曾定位到 PCIe ASPM，但 2026-10-28 实测证伪——ASPM 关闭且回读确认 `0x0/0x0` 之后，4 小时 4 分钟照旧冻死（第 18 次）。现在进入第 8 轮：怀疑落在**空闲状态转换本身**，且 hypervisor 参与其中（崩溃栈顶部 `intelppm!HvRequestIdle`，`Hv` = Hypervisor）。
+**当前状态：没有找到有效解。** 三项干预全部证伪：最新 BIOS（刷后 58 分钟复现）、PCIe ASPM（回读 `0x0/0x0` 后 4 小时 4 分钟冻死）、内存完整性 HVCI（回读 `Enabled = 0` 后 31 分钟冻死）。第 19 次终于留下了崩溃前的完整现场——系统降到 `ActivityLevel 4` 后 31 分钟内冻死，而同一段 `ActivityLevel 0` 的会话跑了 1231 秒正常结束。现在进入第 9 轮：摘掉 hypervisor。
 
 ---
 
@@ -33,15 +33,15 @@
 | BIOS   | `X72 Ver. 01.05.04 Rev.2`（2026-08-13，HP 当前最新）       |
 | 睡眠能力   | S0 低功耗待机可用；**S3 固件不支持**；休眠可用                        |
 | 电池     | 设计 56047 mWh / 满充 55225 mWh（98.5%），**循环仅 2 次**      |
-| 异常断电   | `Kernel-Power 41` × **18**（2026-07-08 → 2026-10-28） |
+| 异常断电   | `Kernel-Power 41` × **19**（2026-07-08 → 2026-10-28） |
 | 蓝屏     | `BugcheckCode` **全部为 0**，无 dump                     |
-| 硬件错误日志 | `WHEA-Logger` × 18（16 条 ID=1，2 条 ID=3）              |
+| 硬件错误日志 | `WHEA-Logger` × 18（16 条 ID=1，2 条 ID=3）——**第 18、19 次均未新增** |
 
 **关键特征：全程没有一次蓝屏。** 系统是「整机瞬间失去响应 → 只能长按电源键 → 下次开机记录一条 41」，不是崩溃重启。
 
 ---
 
-## 2. 八轮结论演进：每一步是被哪条证据推翻的
+## 2. 九轮结论演进：每一步是被哪条证据推翻的
 
 这一节是本文档的核心。排查过程本身就是不断证伪的过程，**保留错误结论的来龙去脉，比只留最终答案有用**。
 
@@ -54,7 +54,8 @@
 | **第 5 轮**     | 走 S4 休眠绕开 S0（合盖即休眠）             | 休眠不进 S0，固件缺陷无触发机会                                                                                                                                                                                               | 方向可行，但**只是回避**，且休眠时远程连不上；用户明确反对「靠改使用习惯兜底」                                 |
 | **第 6 轮**     | 报修，可能要换主板                       | 固件级 Fatal + BIOS 已最新 + 电池循环 2 次                                                                                                                                                                                 | 口径过头：**报修 ≠ 换主板**，是让 HP 走「刷固件 → 诊断 → 判定」流程；`DEADBEEF` 更像结构体未初始化，不能据此断言硬件坏 |
 | **第 7 轮** | **空闲电源转换时 PCIe 链路降档后无法唤醒，整机冻死** | ① 亮屏空闲也崩（第 4 轮证据反推）② 全量回溯发现当时已 17 次、横跨 4 个月与 3 个 BIOS 版本 ③ HP 官方社区同型号双机复现，内核栈落在 `intelppm!HvRequestIdle → PepIdleExecute → PpmIdleExecuteTransition → PoIdle → KiIdleLoop` ④ 本机 ASPM = 最大电源节省量 ⑤ 对方唯一有效缓解 = 关闭 ASPM | **2026-10-28 14:12 被推翻**：ASPM 已关闭并回读确认 `0x0/0x0`，电源方案未变、设置未被打回，**4 小时 4 分钟后第 18 次冻死**。故障点不在 PCIe 链路层，嫌疑退回上一层 |
-| **第 8 轮（当前）** | **空闲状态转换本身失败，hypervisor 参与其中** | ① ASPM 已排除（见第 7 轮）② 崩溃栈顶部 `HvRequestIdle` 的 `Hv` = **Hypervisor**——CPU 进入空闲态这件事是 hypervisor 在发请求 ③ 本机 VBS 状态 = 2（运行中）、`SecurityServicesRunning` 含 `2`（HVCI），hypervisor 全程参与电源状态管理 | 待验证：HVCI 已于 10-28 14:22 关闭并重启（`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4`）；若仍崩 → `bcdedit /set hypervisorlaunchtype off` 彻底摘掉 hypervisor（代价：WSL2 / Docker / 虚拟机 / Credential Guard） |
+| **第 8 轮** | **空闲状态转换本身失败，hypervisor 参与其中** | ① ASPM 已排除（见第 7 轮）② 崩溃栈顶部 `HvRequestIdle` 的 `Hv` = **Hypervisor** ③ 本机 VBS 状态 = 2（运行中）、`SecurityServicesRunning` 含 `2`（HVCI） | **2026-10-28 15:14 被推翻**：HVCI 于 14:22 关闭并重启，`HVCI Enabled = 0`、`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4`，**31 分 25 秒后第 19 次冻死**。但注意——HVCI 只是 hypervisor 的一个安全服务，`HypervisorPresent` 仍为 `True`、VBS 仍为 2，**hypervisor 本身从未被排除**，只是"关 HVCI"这条路走不通 |
+| **第 9 轮（当前）** | **CPU 深度空闲状态转换（PEP → 深 C-state）失败，与睡眠无关** | ① 第 19 次拿到崩溃前完整现场：`14:43:28 → 15:14:53` 一段 **Type 0（Active）** 会话，`ActivityLevel = 4`，1885 秒，`ExitReason = Unknown` ② 天然对照：同机同日 `14:22:28 → 14:43:00` 那段 `ActivityLevel = 0`，1231 秒，`ExitReason = Initialization` **正常结束** ③ 全量 19 次里凡 `ExitReason = Unknown` 的异常记录 `ActivityLevel` 全是 4，正常结束的全是 0 ④ 这次 `STANDBYIDLE = 0`（从不进待机），`CS = false`——**根本没睡，纯粹是深度空闲** ⑤ `Kernel-Processor-Power` 事件 55：空闲状态由 **Micro Power Engine Plugin（11 状态）** 管理，正是崩溃栈里 `PepIdleExecute` 那一层 ⑥ 冻结瞬间 `ExitRemainingCapacity = 0`（进入时 53626 mWh），连电池都读不到 | 待验证：`scripts/disable-hypervisor.ps1 apply` 摘掉 hypervisor（用户确认不用虚拟化）；仍崩 → BIOS `Extended Idle Power States` 设 `Disable` |
 
 ---
 
@@ -78,7 +79,7 @@
 
 ## 4. 踩坑记录
 
-按「数据解析 → 取证逻辑 → 判断与方案」三类，共 30 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次崩溃后新增的 P29、P30）。**每条都是实际踩到并付出过时间的。**
+按「数据解析 → 取证逻辑 → 判断与方案」三类，共 33 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33）。**每条都是实际踩到并付出过时间的。**
 
 > 配套文件：可直接提交 HP 的报修文本见同目录 `warranty-claim.md`。
 
@@ -227,7 +228,7 @@ powercfg -attributes SUB_PCIEXPRESS ee12f906-d277-404b-b6da-e5fa1a576df5
 **P29｜把「崩溃前的后台活动」当成诱因，是最容易自我说服的错误。**  
 第 18 次崩溃前，系统正在**待机中批量安装 6 个应用更新**（13:26–13:46：myHP、WindowsAppRuntime、Clipchamp、ZuneMusic、Xbox、语言包），装完 4 分钟后就冻死了。时间线看起来极有说服力——"维护任务跑完、系统想回深睡、回不去就死了"。
 
-但把这条候选诱因放到全量 18 次上跑一遍：**只有 5 次**在崩溃前 90 分钟内有更新活动，**其余 13 次毫无更新**。
+但把这条候选诱因放到全量 19 次上跑一遍：**只有 6 次**在崩溃前 90 分钟内有更新活动，**其余 13 次毫无更新**。
 
 → 结论：**单次的"巧合关联"不能当因果。** 任何看起来解释力很强的诱因，都必须放到全量事件上验频率，否则会写出一条听起来很合理、实际只对 1/18 成立的解释。
 
@@ -238,6 +239,27 @@ powercfg -attributes SUB_PCIEXPRESS ee12f906-d277-404b-b6da-e5fa1a576df5
 
 → 结论：**判断崩溃时刻只能用"最后一条正常事件的时间"**；6008 的时间只当「存在非正常关机」的布尔值用，不要拿去算时间差。顺带一提，`Kernel-Power 41` 的 `TimeCreated` 也是**下次开机**的时刻，同样不能当崩溃时刻。
 
+**P31｜`ScenarioInstances` 里真正带信息的是 `ActivityLevel`，不是 `Type`。**  
+前 18 次一直盯着 `Type`（0 = Active，1 = 待机），得出的结论绕来绕去。第 19 次才发现判别特征在另一个字段：**19 次崩溃里凡 `ExitReason = Unknown` 的异常记录，`ActivityLevel` 全是 4；正常结束的会话全是 0。**
+
+而 `Type 0` + `ActivityLevel 4` 这种组合最容易骗人——它看起来是"活跃会话"，实际系统已经判定进入最深空闲等级，正在往深 C-state 走。
+
+→ 结论：**先按 `ActivityLevel` 分组，再看 `Type`。** 只看 `Type` 会把"亮屏但深度空闲"误读成"用户在正常使用"。
+
+**P32｜`STANDBYIDLE = 0` 不等于"不会崩"。**  
+第 19 次是在 `STANDBYIDLE = 0`（从不进入待机）、`ConnectedStandbyInProgress = false` 的情况下冻死的。整机 31 分钟全程 `Type 0`，一次待机都没进。
+
+前几轮一直有人（包括我自己）把"避开睡眠"当成兜底思路——"只要不进 S0 就没事"。这次直接把这条路堵死了：**不睡，照样死。**
+
+→ 结论：**别再把「不进待机」当缓解措施。** 要限制的是更下层的 CPU 空闲状态深度，不是睡眠行为。
+
+**P33｜HVCI ≠ hypervisor，关掉前者不等于排除后者。**  
+第 8 轮的推理是"崩溃栈顶是 `HvRequestIdle`，`Hv` = Hypervisor，所以关掉 hypervisor 相关的东西试试"。实际执行的却是关 HVCI（内存完整性）——那只是 hypervisor 之上的一个**安全服务**。
+
+关完之后的真实状态：`HVCI Enabled = 0`、`SecurityServicesRunning` 从 `2,3,4` 变成 `3,4`，但 **`HypervisorPresent` 仍是 `True`、VBS 仍是 `2`**——hypervisor 一直在跑。
+
+→ 结论：**验证"某个组件是否被排除"要看运行态，不是看设置项。** `bcdedit /enum {current}` 里没有 `hypervisorlaunchtype` 就是默认 `auto`，hypervisor 会启动；只有显式设成 `off` 并重启后 `HypervisorPresent = False`，才算真摘掉。
+
 ---
 
 ## 5. 最终技术判断
@@ -245,18 +267,37 @@ powercfg -attributes SUB_PCIEXPRESS ee12f906-d277-404b-b6da-e5fa1a576df5
 ### 5.1 故障机理（当前假设）
 
 ```
-系统空闲（用户不操作，包功耗降到 ~4 W）
+系统空闲（用户不操作）
    ↓
-hypervisor 发起空闲状态转换（栈顶 intelppm!HvRequestIdle，Hv = Hypervisor）
+电源管理器把活动等级降到 ActivityLevel 4（本机所有报告里最深的一档）
+   ↓
+CPU 请求深 C-state —— PEP（Micro Power Engine Plugin，11 个状态）决定进哪一个
+   ↓
+这条请求经 hypervisor 发出（栈顶 intelppm!HvRequestIdle，Hv = Hypervisor）
    ↓
 某一次转换卡住，CPU 停在半个状态里，再也回不来
    ↓
-整机冻死（来不及蓝屏，来不及写 dump）
+整机冻死（来不及蓝屏、来不及写 dump，连电池读数都归零）
    ↓
 只能长按电源键 → 下次开机记录 Kernel-Power 41（BugcheckCode=0）
 ```
 
-**第 7 轮曾把「PCIe 链路降档（ASPM L1.2）」写在这条链上，已被证伪**：ASPM 关闭并回读确认 `0x0/0x0` 之后，4 小时 4 分钟仍冻死。这说明问题不在「进入深空闲时顺手做的某件事」，而在**转换本身**。
+**这条链上被证伪过的两环**：
+
+- **第 7 轮的「PCIe 链路降档（ASPM L1.2）」**：ASPM 关闭并回读确认 `0x0/0x0` 之后，4 小时 4 分钟仍冻死。问题不在「进入深空闲时顺手做的某件事」，而在转换本身。
+- **第 8 轮的「HVCI」**：`Enabled = 0`、`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4` 之后，31 分 25 秒仍冻死。但 HVCI 只是 hypervisor 的安全服务，hypervisor 本身还在（`HypervisorPresent = True`、VBS = 2），所以这一环只否定了「HVCI」这个名字，没有否定「hypervisor」。
+
+**第 19 次给出的新证据（也是唯一一组天然对照）**：
+
+| 会话 | `ActivityLevel` | 时长 | 结果 |
+| --- | --- | --- | --- |
+| 14:22:28 → 14:43:00 | **0** | 1231 秒 | 正常结束（`ExitReason = Initialization`） |
+| 14:43:28 → 15:14:53 | **4** | 1885 秒 | **冻死**（`ExitReason = Unknown`） |
+
+同机、同日、同一个电源方案、相邻两段 `Type 0`（Active）会话。而这次 `STANDBYIDLE = 0`——**整机一次待机都没进**，所以问题不在 S0ix，在更下面一层的 CPU 空闲状态。
+
+冻结瞬间的三个痕迹：日志在 `14:49:32` 之后静默 25 分钟；`ExitRemainingCapacity` 从进入时的 53626 mWh 变成 **0**（EC/SMBus 已无响应）；`WHEA` 一条都没新增。
+
 
 原本支持 ASPM 假说的线索并没有消失，只是指向变了：同型号那台机器关 ASPM 有效、本机无效——**要么存在多种根因，要么 ASPM 只是掩盖了其中一部分**。
 
@@ -264,32 +305,35 @@ hypervisor 发起空闲状态转换（栈顶 intelppm!HvRequestIdle，Hv = Hyper
 
 | 判断                  | 置信度    | 依据                                                                                       |
 | ------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| 故障与睡眠/息屏无关，是「空闲即死」  | **高**  | 18 次全量回溯，5 次明确不在待机中；10-27 亮屏 0 息屏仍崩                                                      |
+| 故障与睡眠/息屏无关，是「空闲即死」  | **极高** | 19 次全量回溯，6 次明确不在待机中；第 19 次 `STANDBYIDLE = 0` 全程未进待机仍冻死                                        |
 | 故障跨 BIOS 版本，刷固件解决不了 | **高**  | 01.03.00 / 01.04.03 / 01.05.04 三个版本都崩；最新版刷后 58 分钟复现                                      |
 | 不是电池、内存、SSD、外设      | **高**  | 电池循环 2 次、双条同型号内存、SSD 无错误计数、无外接设备                                                         |
+| 崩溃发生在最深空闲等级（`ActivityLevel 4`） | **高** | 19 次里凡 `ExitReason = Unknown` 的记录 `ActivityLevel` 全为 4；正常结束的全为 0；同机同日有天然对照              |
+| 故障点在 CPU 空闲状态转换本身 | **中高** | ASPM 排除、HVCI 排除后，剩下的只有 PEP 的 C-state 选择；`Kernel-Processor-Power` 事件 55 显示空闲状态由 PEP（11 状态）管理 |
 | ~~ASPM 是直接诱因~~          | **已否证** | 2026-10-28：ASPM 关闭并回读确认 `0x0/0x0`，4h04m 后第 18 次冻死。**排除 PCIe 链路层**                      |
-| 故障点在空闲状态转换本身        | **中**  | ASPM 排除后，剩下的环节就是「转换」；HP 社区栈顶 `HvRequestIdle` 说明 hypervisor 在里面                                    |
-| hypervisor 参与其中是必要条件   | **中低** | 本机 VBS 运行中、HVCI 启用；但**尚未验证关闭后是否改善**，且同型号那台机器的 VBS 状态未知                                                  |
-| 是平台/固件级缺陷而非用户配置     | **中**  | HP 员工仅定性为 "power management or driver interaction during idle-state transitions"，未承认已知缺陷；关闭唯一的用户可调项（ASPM）后行为不变，支持这一判断 |
+| ~~HVCI 参与其中~~           | **已否证** | 2026-10-28 15:14：`Enabled = 0` 回读确认，31m25s 后第 19 次冻死。**但 hypervisor 本身仍未排除**           |
+| hypervisor 是必要条件        | **中低** | 崩溃栈顶 `HvRequestIdle` 指向它，但**尚未真正摘掉**（`HypervisorPresent` 一直为 `True`）；同型号那台机器的 VBS 状态未知 |
+| 是平台/固件级缺陷而非用户配置     | **中高** | HP 员工仅定性为 "power management or driver interaction during idle-state transitions"，未承认已知缺陷；用户可调项（BIOS/ASPM/HVCI）全部无效，支持这一判断 |
 
 ---
 
 ## 6. 处置与验证
 
-### 6.1 当前配置实况（2026-10-28 14:22 实测）
+### 6.1 当前配置实况（2026-10-28 15:18 实测）
 
 | 项目                                | 值                                     | 评估                                                    |
 | --------------------------------- | ------------------------------------- | ----------------------------------------------------- |
 | **PCIe 链接状态电源管理 (ASPM)**          | `0x0` / `0x0` = 关闭（AC + DC）           | ❌ **已证伪**：10-28 10:08 改好并回读验证，**4h04m 后第 18 次冻死**   |
-| **内存完整性 (HVCI)**                   | **已关闭**（`SecurityServicesRunning` = `3,4`，不含 `2`） | ⏳ 10-28 14:22 关闭并重启，第 8 轮验证中                           |
-| VBS / Hypervisor                  | VBS = 2（运行中，仍有服务 3、4）                 | 仍在参与；第 8 轮备选 `bcdedit /set hypervisorlaunchtype off`    |
+| **内存完整性 (HVCI)**                   | **已关闭**（`Enabled = 0`；`SecurityServicesRunning` = `3,4`） | ❌ **已证伪**：14:22 关闭重启，**31m25s 后第 19 次冻死**            |
+| **hypervisor**                    | `hypervisorlaunchtype` 未设置（= 默认 `auto`）；`HypervisorPresent = True`；VBS = 2 | ⏳ **第 9 轮目标**：`scripts/disable-hypervisor.ps1 apply` → 重启后应为 `False` |
+| 待机超时 `STANDBYIDLE`               | `0` / `0` = **从不进入待机**                | 关键：第 19 次全程未进待机照样冻死，说明与睡眠无关                          |
 | 快速启动（HiberbootEnabled）            | `1` = 开启                              | 未改（可选，非核心）                                            |
-| 关屏超时                              | AC = 从不 / DC = 180 s                  | AC 的「从不」是上一轮遗留，建议回退 15 分钟                             |
-| 休眠超时                              | AC = 从不 / DC = 72 h                   | 无兜底                                                   |
-| BIOS `Extended Idle Power States` | Enable                                | 深度空闲态，可疑（第 4 步候选）                                     |
+| 关屏超时 `VIDEOIDLE`                  | AC = 300 s / DC = 180 s                | 与崩溃无关（第 19 次亮屏时冻死）                                    |
+| 最小处理器状态 `PROCTHROTTLEMIN`         | `0x5` = 5%（AC / DC 同值）               | 未改。注意它控制 **P-state**，不控制 C-state——别指望改它能绕开故障      |
+| BIOS `Extended Idle Power States` | Enable                                | **第 4 步候选**：直接限制 package C-state 深度                  |
 
 > 上表 ASPM 那一行是**本机当前状态**。具体怎么改的、怎么回读验证的见 **6.1.1**；图形界面看不到这个选项时用 **6.1.2**。  
-> **但要注意：改完并不解决问题，只是排除了一个变量。**
+> **但要注意：改完并不解决问题，只是排除了一个变量。** 已经这样排除掉三项了（BIOS / ASPM / HVCI）。
 
 ### 6.1.1 关闭 ASPM 的完整步骤（图形界面，操作已验证有效）
 
@@ -402,17 +446,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 ### 6.1.3 观察基线（判定依据）
 
-| 指标                     | 基线值（10-28 14:22，HVCI 关闭后）  |
-| ---------------------- | ----------------------- |
-| `Kernel-Power 41` 历史总数 | **18**                  |
-| 最近一次异常断电（记录时刻）         | **2026-10-28 14:12:20** |
+| 指标                     | 基线值（10-28 15:18，摘 hypervisor 之前） |
+| ---------------------- | ----------------------------- |
+| `Kernel-Power 41` 历史总数 | **19**                        |
+| 最近一次异常断电（记录时刻）         | **2026-10-28 15:14:53**       |
+| 最早一次                   | **2026-07-08 11:12:26**       |
 
-**判定标准：「最近一次异常断电」时间戳是否仍停在 `10-28 14:12:20`。** 只看这一个数，观察 3–5 天。
+**判定标准：「最近一次异常断电」时间戳是否仍停在 `10-28 15:14:53`。** 只看这一个数，观察 3–5 天。
 
 - 仍停着 → 这个改动有效，保持。
 - 时间戳前进 → 无效，进入 §6.2 下一步。
 
-> **第 7 轮已按此口径判负（范例）**：当时的基线是 `17 次 / 最近 09:33:54`。10:08 关掉 ASPM 并验证 `0x0/0x0` 后，14:12:20 时间戳前进、总数变 18——**4 小时 4 分钟就判负了**。这个例子说明：口径本身没问题，是 ASPM 这个假设错了。
+> **已按此口径判负两次（范例）**：
+> - 第 7 轮 ASPM：基线 `17 次 / 09:33:54` → 10:08 关 ASPM，14:12:20 前进，**4h04m 判负**。
+> - 第 8 轮 HVCI：基线 `18 次 / 14:12:20` → 14:22 关 HVCI，15:14:53 前进，**31m25s 判负**。
+>
+> 口径本身没问题——**是这个样本判负得太快了**，说明这两项都不在因果链上。
 
 > **口径警告**：不要用「近 30 天次数」判定。那是滚动窗口，旧事件会自然滚出，会让人误以为好转。**只看最近一次的时间戳。**
 
@@ -420,18 +469,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 | # | 措施                                                                                                              | 状态                                                                        |
 | --- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 0 | BIOS 升级到 `X72 01.05.04`（HP 当前最新）                                                                                    | ❌ **已证伪**（刷后 58 分钟即复现）                                                    |
 | 1 | `fix-idle-hang.ps1 apply` → ASPM 设为「关闭」（AC+DC）                                                                    | ❌ **已证伪**（10-28 10:08 关闭并验证 `0x0/0x0`，14:12 第 18 次冻死）                 |
-| 2 | 关闭内存完整性（HVCI），重启观察                                                                                              | ⏳ **进行中**（10-28 14:22 关闭并重启，`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4`） |
-| 3 | `bcdedit /set hypervisorlaunchtype off` 彻底摘掉 hypervisor，重启观察                                                     | 待试（代价：WSL2 / Docker / 虚拟机 / Credential Guard 全部失效，需先确认不用）                   |
-| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | 待试                                                                        |
-| 5 | 报修（材料见 `warranty-claim.md`）                                                                                     | 材料已备，含第 18 次                                                            |
+| 2 | 关闭内存完整性（HVCI），重启观察                                                                                              | ❌ **已证伪**（14:22 关闭重启，`Enabled = 0` 回读确认，15:14 第 19 次冻死）            |
+| 3 | `disable-hypervisor.ps1 apply` → `bcdedit /set hypervisorlaunchtype off` 彻底摘掉 hypervisor，重启观察                          | ⏳ **当前步骤**（用户已确认不用虚拟化；代价：WSL2 / Docker / 虚拟机 / Credential Guard 全部失效）  |
+| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | 待试（**直接限制 package C-state 深度**，比第 3 步更贴靶心，但不动虚拟化的话可优先）                  |
+| 5 | 报修（材料见 `warranty-claim.md`）                                                                                     | 材料已备，含第 19 次现场                                                          |
 
-**第 2、3 步为什么都指向 hypervisor**：崩溃栈顶部是 `intelppm!HvRequestIdle`，`Hv` = **Hypervisor**。CPU 进入空闲态这件事，是 hypervisor 在发请求。ASPM 被排除之后，这是剩下的唯一**有名字**的嫌疑。
+**第 3、4 步为什么都指向 CPU 空闲路径**：崩溃栈顶部是 `intelppm!HvRequestIdle`，`Hv` = **Hypervisor**；本机 `Kernel-Processor-Power` 事件 55 又显示空闲状态由 **Micro Power Engine Plugin（11 个状态）** 管理——正是栈里 `PepIdleExecute` 那一层。ASPM 和 HVCI 被排除之后，只剩这条链。
+
+**如果只能选一个**：第 4 步比第 3 步更贴靶心（直接砍掉最深 package C-state），代价是续航变差而不是废掉虚拟化。第 3 步胜在一条命令、可逆。
 
 ### 6.3 已回退 / 已废弃
 
 - **关闭 PCIe ASPM（第 7 轮方案）**：2026-10-28 实测无效。设置目前仍留在 `0x0/0x0`——回滚也没有收益（关掉 ASPM 会略增功耗，想省电可以 `revert`，但别指望它影响故障频率）。⚠️ **README 曾把它写成「修复方法」，那是错的，已于 10-28 更正。**
-- **「待机中跑 Windows 更新是诱因」**：**已排除**。18 次崩溃里只有 **5 次**在崩溃前 90 分钟内有更新活动，其余 13 次毫无更新。第 18 次恰好赶上了批量装应用，属于巧合。
+- **关闭内存完整性（第 8 轮方案）**：2026-10-28 实测无效，31 分 25 秒后第 19 次冻死。设置保持关闭状态（回滚没有收益，且它只是 hypervisor 的一个安全服务，第 9 轮会一并处理）。
+- **「待机中跑 Windows 更新是诱因」**：**已排除**。19 次崩溃里只有 **5 次**在崩溃前 90 分钟内有更新活动，其余 14 次毫无更新。第 18 次恰好赶上了批量装应用，属于巧合。
+- **「靠不进待机来回避」（第 4、5 轮思路）**：**已彻底排除**。第 19 次在 `STANDBYIDLE = 0`（从不进待机）、全程 `Type 0` 的情况下照样冻死。
 - `power-mode.ps1` 的 `remote` 模式（AC 永不息屏）：**无效且费电**，不再推荐（脚本文件保留，仅 `hibernate` 档可作兜底）。
 - 第一版 Word 取证报告（`output/` 下）：含 BIOS 版本错误与过时结论，**连同整个流水线中间件已于 10-28 删除**，以本目录两份 MD 为准。
 
@@ -442,7 +496,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 问题                        | 说明                                                                   |
 | ------------------------- | -------------------------------------------------------------------- |
 | AMD/Intel 固件层面能否根本修复      | 只能等 HP 出新 BIOS，且要求 release notes 出现 Modern Standby / idle 相关修复；无固定周期 |
-| **关闭 HVCI 后若仍崩，是否该摘掉 hypervisor** | `bcdedit /set hypervisorlaunchtype off` 能彻底排除 hypervisor，但会连带废掉 WSL2 / Docker / 虚拟机 / Credential Guard。**值不值得，取决于是否日常使用这些** |
+| **摘掉 hypervisor 后若仍崩，还剩什么** | 下一位是 BIOS 的 `Extended Idle Power States`（直接限制 package C-state 深度）。再往下就是平台固件本身，用户侧已无可调项——那时只能报修或等 HP 出 BIOS |
+| 为什么第 19 次崩溃前 25 分钟零事件 | `14:49:32` 之后到 `15:14:50` 重启，系统日志完全静默 25 分钟——**冻死时来不及记录任何东西**，这也是抓不到 dump 的同一个原因。同一现象在第 18 次也出现过（静默 22 分钟） |
+| 为什么 `ExitRemainingCapacity` 会变成 0 | 进入时读到 53626 mWh，退出时读到 **0**。说明冻结瞬间连 EC / SMBus 都不响应了。这更像平台整体停摆，而不是某个驱动挂掉——但还不能据此指认具体硬件 |
+| 为什么第 18、19 次没有 WHEA 记录 | WHEA 停在 `10-28 09:34:09`（第 17 次），此后两次崩溃一条都没新增。**WHEA 与崩溃并非一一对应**，不能拿"没有 WHEA"反证硬件正常。原因未明 |
 | 为什么同型号机器关 ASPM 有效、本机无效    | 目前无法解释。可能是不同批次的固件差异，也可能是两台机器的根因本就不同——但这意味着**网上任何「关 ASPM 就好了」的经验都不该当作通用解** |
 | 远程可用性 vs 休眠兜底             | 休眠时远程连不上（物理限制），需配 WOL 才能兼顾                                           |
 | `DEADBEEF` 36% 的真实含义      | 已知是「结构体未初始化」，但无法判断是「代码忘初始化」还是「SPI/NVRAM 区域损坏」                        |

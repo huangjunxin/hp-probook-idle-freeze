@@ -1,15 +1,17 @@
 # HP ProBook 4 G1i 14 — Freezes Solid When Idle, No BSOD, No Dump
 
-**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——八轮假设，每轮都被证据推翻。**  
-*A real-machine investigation into a Windows 11 idle hard-freeze — eight rounds of hypotheses, each one disproved by evidence. **Still unsolved.***
+**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——九轮假设，每轮都被证据推翻。**  
+*A real-machine investigation into a Windows 11 idle hard-freeze — nine rounds of hypotheses, each one disproved by evidence. **Still unsolved.***
 
-> ### ⚠️ 当前状态（2026-10-28）：没有找到有效解
+> ### ⚠️ 当前状态（2026-10-28 15:14）：19 次，没有找到有效解
 >
-> 关闭 PCIe ASPM 曾被认为有效（HP 社区另一台同型号用户靠它缓解），但**在本机已证伪**：ASPM 关闭并回读确认为 `0x0/0x0` 后，4 小时零 4 分钟照旧冻死（第 18 次）。
+> 三项干预已全部被证伪：**最新 BIOS**（刷后 58 分钟复现）、**关闭 PCIe ASPM**（回读确认 `0x0/0x0`，4 小时 4 分钟后冻死）、**关闭内存完整性 HVCI**（回读确认 `Enabled = 0`，31 分钟后冻死）。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 30 条踩坑记录**——帮你少走这四个月的弯路。
+> 但第 19 次留下了前 18 次都没有的东西：**崩溃前的完整现场**。同一天、同一台机器、相邻两段 Active 会话——`ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死。而这次**全程没有进入待机**（`STANDBYIDLE = 0`），是亮屏、纯 Active、深度空闲时死的，冻结瞬间连电池读数都归了零。
 >
-> ***No working fix.** Disabling PCIe ASPM had worked for another user with the identical model, but **it was disproved on this machine**: ASPM was set to Off and verified at `0x0/0x0`, and the machine still froze 4 h 4 min later (18th occurrence). What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 30 documented pitfalls**.*
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 33 条踩坑记录**——帮你少走这四个月的弯路。
+>
+> ***No working fix after 19 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). The 19th freeze did leave one thing the previous 18 never did — a complete pre-crash scene. Same machine, same day, two adjacent Active sessions: `ActivityLevel 0` ran 1231 s and ended normally; `ActivityLevel 4` ran 1885 s and froze. That crash happened **without ever entering standby** (`STANDBYIDLE = 0`) — plain screen-on deep idle — and the battery reading had dropped to zero at the moment of the freeze. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 33 documented pitfalls**.*
 
 > **关于「死亡睡眠」这个代号 / On the name.** 我们一开始把这个故障叫作 **Dead Sleep（死亡睡眠）**，查到最后发现**叫错了**——它跟睡眠没有因果关系。名字留在这里只当个纪念。  
 > *We called this bug "dead sleep" at first. That turned out to be a misdiagnosis — the freeze was never caused by sleep. The name is kept here as a memento only.*
@@ -18,16 +20,16 @@
 >
 > This repo documents a HP ProBook 4 G1i 14 inch Notebook AI PC (Intel Core Ultra, Windows 11 25H2 build 26200) that **hard-freezes when idle**: screen on, no apps running, ~4 W package power, then the whole machine locks up — mouse and keyboard dead, no blue screen, no reboot, no crash dump. Every occurrence leaves exactly one `Kernel-Power 41` event with `BugcheckCode = 0`.
 >
-> **18 occurrences** between 2026-07-08 and 2026-10-28, spanning **3 BIOS versions** — and **5 of them happened while the machine was not in Modern Standby at all** (plain screen-on idle).
+> **19 occurrences** between 2026-07-08 and 2026-10-28, spanning **3 BIOS versions** — and **6 of them happened while the machine was not in Modern Standby at all** (plain screen-on idle).
 >
-> Working hypothesis: the freeze happens inside the **CPU / hypervisor idle-state transition**, not in PCIe. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
+> Working hypothesis: the freeze happens inside the **CPU idle-state transition**, managed by the **PEP (Micro Power Engine Plugin, 11 idle states)** and requested through the hypervisor. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
 >
-> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — eight rounds of hypotheses, each one and what disproved it, plus 30 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
+> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — nine rounds of hypotheses, each one and what disproved it, plus 33 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
 **症状**：CPU 请求深空闲态时整机冻死——屏幕亮着、没开任何程序、功耗只有 4 W 的时候一样会冻。  
-**规模**：2026-07-08 至 2026-10-28 共 **18 次**无蓝屏硬断电，横跨 3 个 BIOS 版本，其中 **5 次发生在完全没待机的时候**（13 次在连接待机中）。
+**规模**：2026-07-08 至 2026-10-28 共 **19 次**无蓝屏硬断电，横跨 3 个 BIOS 版本，其中 **6 次发生在完全没待机的时候**（13 次在连接待机中）。
 
 ---
 
@@ -88,7 +90,6 @@ powercfg /query SCHEME_CURRENT SUB_PCIEXPRESS ee12f906-d277-404b-b6da-e5fa1a576d
 > 保留下面这段操作步骤，是因为：① 该方法在 HP 社区另一台**同型号**机器上确实缓解过，对别人可能仍有参考价值；② “连这个都不管用”本身就是一条诊断信息——说明故障点不在 PCIe 链路层。
 >
 > ***Measured 2026-10-28: it does not work.** ASPM verified at `0x0/0x0` by reading back the value, and the machine froze again 4 h 4 min later (18th occurrence), with the same power plan and the setting still in place. Kept because it helped another user with the identical model, and because "even this didn't help" tells you the fault is not at the PCIe link layer.*
-
 ### 图形界面（推荐，5 步，不用命令行） / GUI (recommended, 5 steps, no CLI)
 
 1. **先确认选项没被隐藏** / *confirm the setting isn't hidden*，PowerShell 执行：
@@ -165,35 +166,50 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 | # | 措施 / Measure | 状态 / Status |
 | --- | --- | --- |
+| 0 | 升级到最新 BIOS（`X72 01.05.04`）/ *Latest BIOS* | ❌ **已证伪** — 刷后 58 分钟复现<br />*Disproved — froze 58 min after flashing* |
 | 1 | 关闭 PCIe ASPM / *Disable PCIe ASPM* | ❌ **已证伪** — 2026-10-28，`0x0/0x0` 生效 4h04m 后仍崩<br />*Disproved — froze 4 h 4 min after verifying `0x0/0x0`* |
-| 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ⏳ **进行中** — 10-28 14:22 关闭并重启，`SecurityServicesRunning` 已不含 `2`<br />*In progress — disabled and rebooted 2026-10-28 14:22; `SecurityServicesRunning` no longer contains `2`* |
-| 3 | `bcdedit /set hypervisorlaunchtype off`（彻底摘掉 hypervisor）<br />*Remove the hypervisor entirely* | 待试 — 会连带影响 WSL2 / Docker / 虚拟机 / Credential Guard<br />*Untested — breaks WSL2, Docker, VMs, Credential Guard* |
-| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 待试 / *Untested* |
-| 5 | 带证据报修 / *Warranty claim* | 材料已备好 / *Evidence package ready* |
+| 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**<br />*Disproved — disabled and verified `Enabled = 0`, froze again 31 min later (19th)* |
+| 3 | `bcdedit /set hypervisorlaunchtype off`（彻底摘掉 hypervisor）<br />*Remove the hypervisor entirely* | ⏳ **下一步** — 脚本：`scripts/disable-hypervisor.ps1`；会连带影响 WSL2 / Docker / 虚拟机 / Credential Guard<br />*Next up — script provided; breaks WSL2, Docker, VMs, Credential Guard* |
+| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 待试 — 直接限制 package C-state 深度，不动虚拟化<br />*Untested — caps package C-state depth, leaves virtualisation alone* |
+| 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19 次现场）/ *Evidence package ready* |
 
-**为什么第 2、3 步都指向 hypervisor**：HP 社区同型号机的崩溃栈顶部是 `intelppm!HvRequestIdle` —— **`Hv` 就是 Hypervisor**。CPU 进入空闲态这件事本身，是 hypervisor 在发请求。ASPM 关掉无效，恰好说明故障点不在 PCIe 链路层，而在更下面的 CPU 空闲路径。  
-*Why steps 2–3 point at the hypervisor: the crash stack from the HP community thread tops out at `intelppm!HvRequestIdle` — **`Hv` = Hypervisor**. Entering an idle state is something the hypervisor requests. ASPM being irrelevant places the fault below the PCIe link layer, in the CPU idle path itself.*
+**为什么第 3、4 步都指向 CPU 空闲路径**：HP 社区同型号机的崩溃栈顶部是 `intelppm!HvRequestIdle` —— **`Hv` 就是 Hypervisor**。CPU 进入空闲态这件事本身，是 hypervisor 在发请求。ASPM 关掉无效，恰好说明故障点不在 PCIe 链路层；而本机 `Kernel-Processor-Power` 事件 55 显示空闲状态由 **Micro Power Engine Plugin（11 个状态）**管理，正是崩溃栈里 `PepIdleExecute` 那一层。  
+*Why steps 3–4 point at the CPU idle path: the stack tops out at `intelppm!HvRequestIdle` — **`Hv` = Hypervisor**. And this machine's `Kernel-Processor-Power` event 55 reports idle states managed by the **Micro Power Engine Plugin (11 states)** — exactly the layer `PepIdleExecute` sits in.*
 
 ---
 
 ## 为什么会这样 / Why This Happens
 
 ```
-系统空闲 → CPU 请求深空闲态（PEP idle transition）
-Idle → CPU requests a deep idle state
+系统空闲 → 电源管理器把活动等级降到 ActivityLevel 4（本仓库所有报告里最深的一档）
+Idle → the power manager drops the activity level to 4, the deepest seen in these reports
    ↓
-hypervisor 参与这次转换（栈顶 intelppm!HvRequestIdle）
-The hypervisor takes part in the transition (stack top: intelppm!HvRequestIdle)
+CPU 请求深 C-state —— 由 PEP（Micro Power Engine Plugin，11 个状态）决定进哪一个
+CPU asks for a deep C-state — PEP (Micro Power Engine Plugin, 11 states) picks which one
+   ↓
+这条请求经 hypervisor 发出（栈顶 intelppm!HvRequestIdle）
+The request goes through the hypervisor (stack top: intelppm!HvRequestIdle)
    ↓
 某一次转换卡住，CPU 停在半个状态里，再也回不来
 One transition wedges; the CPU never completes it
    ↓
-整机冻死（来不及蓝屏，来不及写 dump）
-Whole machine hangs — too fast for a BSOD, too fast for a dump
+整机冻死 —— 来不及蓝屏、来不及写 dump，连电池读数都归零
+Whole machine hangs: no BSOD, no dump, even the battery reading goes to zero
    ↓
 只能长按电源键 → 下次开机补记一条 Kernel-Power 41（BugcheckCode=0）
 Hold the power button → next boot writes one Kernel-Power 41 (BugcheckCode=0)
 ```
+
+**支撑这条链路的唯一一组对照实验**（2026-10-28，同机同日、同一个电源方案、相邻两段 Active 会话）：
+
+| 会话 | `ActivityLevel` | 时长 | 结果 |
+| --- | --- | --- | --- |
+| 14:22:28 → 14:43:00 | **0** | 1231 秒 | 正常结束（`ExitReason = Initialization`） |
+| 14:43:28 → 15:14:53 | **4** | 1885 秒 | **冻死**（`ExitReason = Unknown`） |
+
+全部 19 次的 `ScenarioInstances` 里，凡是 `ExitReason = Unknown` 的异常记录，`ActivityLevel` 全是 4；正常结束的全是 0。而这次崩溃**全程没有进入待机**（`STANDBYIDLE = 0`）——所以问题不在 S0ix，在更下面一层的 CPU 空闲状态。
+
+*The only natural control experiment in this repo. Same machine, same day, same power plan, two adjacent Active sessions: level 0 ran 1231 s and ended normally; level 4 ran 1885 s and froze. Across all 19 occurrences, every `ExitReason = Unknown` record sits at `ActivityLevel 4`; every normal record sits at 0. And this crash **never entered standby** (`STANDBYIDLE = 0`) — so the fault is not in S0ix, it is one layer below, in the CPU idle states.*
 
 这条链上，**PCIe ASPM 曾经是头号嫌疑**——它正好位于"进入深空闲"这一步，会顺手把 PCIe 链路降到 L1.2。HP 社区那台同型号机器关掉它就缓解了。
 
@@ -223,9 +239,10 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | 路径 / Path                               | 说明 / Description                                                                                                                                                      |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
+| `scripts/disable-hypervisor.ps1` | 摘掉 Hyper-V hypervisor（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the Hyper-V hypervisor, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：八轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、30 条踩坑<br />**Core doc** — eight rounds of hypotheses and what disproved each, capability limits of 9 data sources, 30 pitfalls |
-| `docs/warranty-claim.md`                | 可直接套用的报修模板（含 18 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 18-event table, ruled-out causes, requested actions)*                                            |
+| `docs/troubleshooting-log.md`           | **核心文档**：九轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、33 条踩坑<br />**Core doc** — nine rounds of hypotheses and what disproved each, capability limits of 9 data sources, 33 pitfalls |
+| `docs/warranty-claim.md`                | 可直接套用的报修模板（含 19 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |
 
@@ -248,10 +265,10 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
   *On this machine, 36% of the `WHEA-Logger` CPER record is `0xDEADBEEF` (uninitialised memory) and every referenced GUID is zero. It only proves "last shutdown was abnormal" — **it identifies no component**. Do not use it as component-level diagnostics.*
 - 脚本会修改系统电源设置。`apply` 前会自动把当前电源方案导出到桌面，但不做任何额外保护。**跑之前自己确认能接受这个改动**，出问题用 `revert` 或导入备份 `.pow` 恢复。  
   *The scripts modify system power settings. `apply` exports the current plan to the Desktop first, but offers no other protection. **Know what you're changing**; recover with `revert` or by importing the `.pow` backup.*
-- **本仓库目前不提供已确认有效的修复方法。** 截至 2026-10-28 第 18 次崩溃，所有尝试过的措施都被证伪或仍在验证中。ASPM 一节保留操作步骤，但它对本机无效——请勿照做后认为问题已解决。  
-  *This repo **does not offer a confirmed fix.** As of the 18th freeze on 2026-10-28, every measure tried has been disproved or is still under test. The ASPM section keeps its how-to, but **it did not work here** — do not walk away thinking it did.*
-- 本仓库不主张「这是硬件损坏」。崩溃栈和同型号群发性指向**平台层/固件层缺陷**，但 18 次全部 `BugcheckCode = 0`、WHEA 无有效组件信息，**没有硬件故障的直接证据**。  
-  *This repo does **not** claim the hardware is broken. The stack trace and same-model clustering point to a **platform/firmware defect**, but all 18 events carry `BugcheckCode = 0` and WHEA yields no valid component data — **there is no direct evidence of failed hardware**.*
+- **本仓库目前不提供已确认有效的修复方法。** 截至 2026-10-28 第 19 次崩溃，所有尝试过的措施（最新 BIOS、关 ASPM、关 HVCI）**全部被证伪**。ASPM 一节保留操作步骤，但它对本机无效——请勿照做后认为问题已解决。  
+  *This repo **does not offer a confirmed fix.** As of the 19th freeze on 2026-10-28, every measure tried (latest BIOS, ASPM off, HVCI off) has been **disproved**. The ASPM section keeps its how-to, but **it did not work here** — do not walk away thinking it did.*
+- 本仓库不主张「这是硬件损坏」。崩溃栈和同型号群发性指向**平台层/固件层缺陷**，但 19 次全部 `BugcheckCode = 0`、WHEA 无有效组件信息，**没有硬件故障的直接证据**。  
+  *This repo does **not** claim the hardware is broken. The stack trace and same-model clustering point to a **platform/firmware defect**, but all 19 events carry `BugcheckCode = 0` and WHEA yields no valid component data — **there is no direct evidence of failed hardware**.*
 
 ---
 
