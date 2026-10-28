@@ -2,7 +2,7 @@
   disable-hypervisor.ps1  —  摘掉 Hyper-V hypervisor（第 9 轮排查手段）
 
   为什么试这个：
-    19 次冻结的崩溃栈顶部都是 intelppm!HvRequestIdle —— 这里的 Hv 就是 Hypervisor。
+    20 次冻结的崩溃栈顶部都是 intelppm!HvRequestIdle —— 这里的 Hv 就是 Hypervisor。
     CPU 决定进入哪个 C-state 时，这条路径要经过 hypervisor。关掉 HVCI 只是摘掉
     hypervisor 的一个安全服务，hypervisor 本身还在跑（VBS 状态仍为 2）。
     本脚本把 hypervisor 整个关掉，让 HvRequestIdle 这条路径彻底不被调用。
