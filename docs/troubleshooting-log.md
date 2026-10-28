@@ -55,7 +55,7 @@
 | **第 6 轮**     | 报修，可能要换主板                       | 固件级 Fatal + BIOS 已最新 + 电池循环 2 次                                                                                                                                                                                 | 口径过头：**报修 ≠ 换主板**，是让 HP 走「刷固件 → 诊断 → 判定」流程；`DEADBEEF` 更像结构体未初始化，不能据此断言硬件坏 |
 | **第 7 轮** | **空闲电源转换时 PCIe 链路降档后无法唤醒，整机冻死** | ① 亮屏空闲也崩（第 4 轮证据反推）② 全量回溯发现当时已 17 次、横跨 4 个月与 3 个 BIOS 版本 ③ HP 官方社区同型号双机复现，内核栈落在 `intelppm!HvRequestIdle → PepIdleExecute → PpmIdleExecuteTransition → PoIdle → KiIdleLoop` ④ 本机 ASPM = 最大电源节省量 ⑤ 对方唯一有效缓解 = 关闭 ASPM | **2026-10-28 14:12 被推翻**：ASPM 已关闭并回读确认 `0x0/0x0`，电源方案未变、设置未被打回，**4 小时 4 分钟后第 18 次冻死**。故障点不在 PCIe 链路层，嫌疑退回上一层 |
 | **第 8 轮** | **空闲状态转换本身失败，hypervisor 参与其中** | ① ASPM 已排除（见第 7 轮）② 崩溃栈顶部 `HvRequestIdle` 的 `Hv` = **Hypervisor** ③ 本机 VBS 状态 = 2（运行中）、`SecurityServicesRunning` 含 `2`（HVCI） | **2026-10-28 15:14 被推翻**：HVCI 于 14:22 关闭并重启，`HVCI Enabled = 0`、`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4`，**31 分 25 秒后第 19 次冻死**。但注意——HVCI 只是 hypervisor 的一个安全服务，`HypervisorPresent` 仍为 `True`、VBS 仍为 2，**hypervisor 本身从未被排除**，只是"关 HVCI"这条路走不通 |
-| **第 9 轮（当前）** | **CPU 深度空闲状态转换（PEP → 深 C-state）失败，与睡眠无关** | ① 第 19 次拿到崩溃前完整现场：`14:43:28 → 15:14:53` 一段 **Type 0（Active）** 会话，`ActivityLevel = 4`，1885 秒，`ExitReason = Unknown` ② 天然对照：同机同日 `14:22:28 → 14:43:00` 那段 `ActivityLevel = 0`，1231 秒，`ExitReason = Initialization` **正常结束** ③ 全量 19 次里凡 `ExitReason = Unknown` 的异常记录 `ActivityLevel` 全是 4，正常结束的全是 0 ④ 这次 `STANDBYIDLE = 0`（从不进待机），`CS = false`——**根本没睡，纯粹是深度空闲** ⑤ `Kernel-Processor-Power` 事件 55：空闲状态由 **Micro Power Engine Plugin（11 状态）** 管理，正是崩溃栈里 `PepIdleExecute` 那一层 ⑥ 冻结瞬间 `ExitRemainingCapacity = 0`（进入时 53626 mWh），连电池都读不到 | 待验证：`scripts/disable-hypervisor.ps1 apply` 摘掉 hypervisor（用户确认不用虚拟化）；仍崩 → BIOS `Extended Idle Power States` 设 `Disable` |
+| **第 9 轮（当前）** | **CPU 深度空闲状态转换（PEP → 深 C-state）失败，与睡眠无关** | ① 第 19 次拿到崩溃前完整现场：`14:43:28 → 15:14:53` 一段 **Type 0（Active）** 会话，`ActivityLevel = 4`，1885 秒，`ExitReason = Unknown` ② 天然对照：同机同日 `14:22:28 → 14:43:00` 那段 `ActivityLevel = 0`，1231 秒，`ExitReason = Initialization` **正常结束** ③ 全量 19 次里凡 `ExitReason = Unknown` 的异常记录 `ActivityLevel` 全是 4，正常结束的全是 0 ④ 这次 `STANDBYIDLE = 0`（从不进待机），`CS = false`——**根本没睡，纯粹是深度空闲** ⑤ `Kernel-Processor-Power` 事件 55：空闲状态由 **Micro Power Engine Plugin（11 状态）** 管理，正是崩溃栈里 `PepIdleExecute` 那一层 ⑥ 冻结瞬间 `ExitRemainingCapacity = 0`（进入时 53626 mWh），连电池都读不到 | 待验证：`scripts/disable-hypervisor.ps1 apply` 摘掉 hypervisor（用户确认不用虚拟化）。**第一次尝试已失败**：15:39 只关 `bcdedit`，15:42 重启后 hypervisor 照起（事件 1 + 153「enabled due to VBS registry configuration」）→ 见 P34，脚本已改为 VBS 注册表 + `bcdedit` 两个开关一起关。仍崩 → BIOS `Extended Idle Power States` 设 `Disable` |
 
 ---
 
@@ -79,7 +79,7 @@
 
 ## 4. 踩坑记录
 
-按「数据解析 → 取证逻辑 → 判断与方案」三类，共 33 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33）。**每条都是实际踩到并付出过时间的。**
+按「数据解析 → 取证逻辑 → 判断与方案」三类，共 35 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33，第 9 轮第一次尝试失败后新增 P34、P35）。**每条都是实际踩到并付出过时间的。**
 
 > 配套文件：可直接提交 HP 的报修文本见同目录 `warranty-claim.md`。
 
@@ -260,6 +260,42 @@ powercfg -attributes SUB_PCIEXPRESS ee12f906-d277-404b-b6da-e5fa1a576df5
 
 → 结论：**验证"某个组件是否被排除"要看运行态，不是看设置项。** `bcdedit /enum {current}` 里没有 `hypervisorlaunchtype` 就是默认 `auto`，hypervisor 会启动；只有显式设成 `off` 并重启后 `HypervisorPresent = False`，才算真摘掉。
 
+**P34｜`hypervisorlaunchtype off` 压不住 VBS——两个开关必须一起关。**  
+第 9 轮第一次尝试只跑了 `disable-hypervisor.ps1 apply`（当时脚本只做 `bcdedit /set hypervisorlaunchtype off`），15:42:01 重启，结果：
+
+```
+15:42:02  Microsoft-Windows-Hyper-V-Hypervisor  事件 1  虚拟机监控程序已成功启动
+15:42:02  Microsoft-Windows-Hyper-V-Hypervisor  事件 2  计划程序类型为 0x4
+15:42:02  Kernel-Boot / CodeIntegrity          事件 153
+          基于虚拟化的安全性(策略: VBS Enabled, VSM Required, Secure Boot, ...)
+          是 enabled due to VBS registry configuration
+```
+
+`HypervisorPresent` 仍是 `True`，VBS 状态仍是 `2`。原因不在 `bcdedit`，而在注册表：
+
+| 位置 | 值 | 含义 |
+| --- | --- | --- |
+| `HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\EnableVirtualizationBasedSecurity` | `1` | **VBS 总开关开着** |
+| 同上 `WasEnabledBy` | `1` | 由 Windows 默认/策略开启，不是用户手动开的 |
+| 同上 `RequirePlatformSecurityFeatures` | `3` | 要求 Secure Boot + DMA 保护（Secured-core 机型常见） |
+| 同上 `HyperVVirtualizationBasedSecurityOptout` | `0` | 没有 opt-out |
+
+事件 153 那句 **"enabled due to VBS registry configuration"** 就是铁证：**只要 VBS 注册表开关是 1，Windows 会以「VBS 需要 VSM」为由强行加载 hypervisor**，`bcdedit` 那一条被架空。
+
+→ 结论：**摘 hypervisor = 关 VBS 注册表 + 关 `hypervisorlaunchtype`，缺一个就白重启一次。** 脚本已改为 `apply` 同时写三处（`EnableVirtualizationBasedSecurity`、`HypervisorEnforcedCodeIntegrity\Enabled`、`LSA\LsaCfgFlags`）再设 `bcdedit`。
+
+**P35｜`bcdedit /enum {current}` 在 Win11 26200 上会报「指定的项类型无效」，把回读搞成假失败。**  
+脚本原来用 `bcdedit /enum '{current}'` 回读 `hypervisorlaunchtype`。本机实测（PowerShell 和 cmd 都一样）：
+
+```
+bcdedit /enum {current}   →  指定的项类型无效。  (exit 1)
+bcdedit /enum             →  无法打开启动配置数据存储。拒绝访问。  (说明参数解析没问题，只是没提权)
+```
+
+也就是说 `{current}` 这个标识被当成了「项类型」。后果很隐蔽：`$matches` 永远匹配不到 → `Get-LaunchType` 永远返回 `$null` → `apply` 回读那步打印红色「❌ 写入失败或被拒绝」并 `return 1`。**于是「写成功了读不出来」和「真的写失败」在输出上长得一模一样**——本次就是这样把 BCD 的真实状态搞丢了，只能靠重启后的 hypervisor 事件反推。
+
+→ 结论：**不带参数的 `bcdedit /enum` 读的就是默认启动项，用它。** 另外任何"回读验证"都别只信任一种取数方式，取不到值时要区分「真的没写进去」和「读取方式坏了」——这两种情况会导向完全相反的下一步。
+
 ---
 
 ## 5. 最终技术判断
@@ -325,7 +361,7 @@ CPU 请求深 C-state —— PEP（Micro Power Engine Plugin，11 个状态）�
 | --------------------------------- | ------------------------------------- | ----------------------------------------------------- |
 | **PCIe 链接状态电源管理 (ASPM)**          | `0x0` / `0x0` = 关闭（AC + DC）           | ❌ **已证伪**：10-28 10:08 改好并回读验证，**4h04m 后第 18 次冻死**   |
 | **内存完整性 (HVCI)**                   | **已关闭**（`Enabled = 0`；`SecurityServicesRunning` = `3,4`） | ❌ **已证伪**：14:22 关闭重启，**31m25s 后第 19 次冻死**            |
-| **hypervisor**                    | `hypervisorlaunchtype` 未设置（= 默认 `auto`）；`HypervisorPresent = True`；VBS = 2 | ⏳ **第 9 轮目标**：`scripts/disable-hypervisor.ps1 apply` → 重启后应为 `False` |
+| **hypervisor**                    | 15:39 执行过 `disable-hypervisor.ps1 apply`，但脚本回读用的 `bcdedit /enum {current}` 在本机报「指定的项类型无效」，**写入结果未能确认**；重启后 `HypervisorPresent = True`、VBS = 2；`EnableVirtualizationBasedSecurity = 1`、`WasEnabledBy = 1`、`RequirePlatformSecurityFeatures = 3` | ⏳ **第 9 轮进行中，第一次尝试未生效**：VBS 注册表这一层没关，hypervisor 必然起来（见 P34）。脚本已升级为两个开关一起关、回读改用无参 `bcdedit /enum` |
 | 待机超时 `STANDBYIDLE`               | `0` / `0` = **从不进入待机**                | 关键：第 19 次全程未进待机照样冻死，说明与睡眠无关                          |
 | 快速启动（HiberbootEnabled）            | `1` = 开启                              | 未改（可选，非核心）                                            |
 | 关屏超时 `VIDEOIDLE`                  | AC = 300 s / DC = 180 s                | 与崩溃无关（第 19 次亮屏时冻死）                                    |
@@ -484,7 +520,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 - **关闭 PCIe ASPM（第 7 轮方案）**：2026-10-28 实测无效。设置目前仍留在 `0x0/0x0`——回滚也没有收益（关掉 ASPM 会略增功耗，想省电可以 `revert`，但别指望它影响故障频率）。⚠️ **README 曾把它写成「修复方法」，那是错的，已于 10-28 更正。**
 - **关闭内存完整性（第 8 轮方案）**：2026-10-28 实测无效，31 分 25 秒后第 19 次冻死。设置保持关闭状态（回滚没有收益，且它只是 hypervisor 的一个安全服务，第 9 轮会一并处理）。
-- **「待机中跑 Windows 更新是诱因」**：**已排除**。19 次崩溃里只有 **5 次**在崩溃前 90 分钟内有更新活动，其余 14 次毫无更新。第 18 次恰好赶上了批量装应用，属于巧合。
+- **「待机中跑 Windows 更新是诱因」**：**已排除**。19 次崩溃里只有 **6 次**在崩溃前 90 分钟内有更新活动，其余 13 次毫无更新。第 18 次恰好赶上了批量装应用，属于巧合。
 - **「靠不进待机来回避」（第 4、5 轮思路）**：**已彻底排除**。第 19 次在 `STANDBYIDLE = 0`（从不进待机）、全程 `Type 0` 的情况下照样冻死。
 - `power-mode.ps1` 的 `remote` 模式（AC 永不息屏）：**无效且费电**，不再推荐（脚本文件保留，仅 `hibernate` 档可作兜底）。
 - 第一版 Word 取证报告（`output/` 下）：含 BIOS 版本错误与过时结论，**连同整个流水线中间件已于 10-28 删除**，以本目录两份 MD 为准。

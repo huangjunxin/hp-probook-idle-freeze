@@ -169,7 +169,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 0 | 升级到最新 BIOS（`X72 01.05.04`）/ *Latest BIOS* | ❌ **已证伪** — 刷后 58 分钟复现<br />*Disproved — froze 58 min after flashing* |
 | 1 | 关闭 PCIe ASPM / *Disable PCIe ASPM* | ❌ **已证伪** — 2026-10-28，`0x0/0x0` 生效 4h04m 后仍崩<br />*Disproved — froze 4 h 4 min after verifying `0x0/0x0`* |
 | 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**<br />*Disproved — disabled and verified `Enabled = 0`, froze again 31 min later (19th)* |
-| 3 | `bcdedit /set hypervisorlaunchtype off`（彻底摘掉 hypervisor）<br />*Remove the hypervisor entirely* | ⏳ **下一步** — 脚本：`scripts/disable-hypervisor.ps1`；会连带影响 WSL2 / Docker / 虚拟机 / Credential Guard<br />*Next up — script provided; breaks WSL2, Docker, VMs, Credential Guard* |
+| 3 | 摘掉 hypervisor：**VBS 注册表 + `bcdedit` 两个开关都要关**<br />*Remove the hypervisor: turn off **both** the VBS registry switch and `bcdedit`* | ⏳ **进行中** — 脚本 `scripts/disable-hypervisor.ps1`；**只关 `bcdedit` 无效**（实测重启后 hypervisor 照起，见 §踩坑 P34）；会连带影响 WSL2 / Docker / 虚拟机 / Credential Guard<br />*In progress — **`bcdedit` alone is not enough** (verified: the hypervisor still launched after reboot); breaks WSL2, Docker, VMs, Credential Guard* |
 | 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 待试 — 直接限制 package C-state 深度，不动虚拟化<br />*Untested — caps package C-state depth, leaves virtualisation alone* |
 | 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19 次现场）/ *Evidence package ready* |
 
@@ -239,7 +239,7 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | 路径 / Path                               | 说明 / Description                                                                                                                                                      |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
-| `scripts/disable-hypervisor.ps1` | 摘掉 Hyper-V hypervisor（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the Hyper-V hypervisor, with virtualisation-dependency checks and a freeze baseline* |
+| `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
 | `docs/troubleshooting-log.md`           | **核心文档**：九轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、33 条踩坑<br />**Core doc** — nine rounds of hypotheses and what disproved each, capability limits of 9 data sources, 33 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 19 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
