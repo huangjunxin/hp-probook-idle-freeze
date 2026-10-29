@@ -19,6 +19,8 @@
 >
 > **而且这一切是在虚拟化完全没动的前提下发生的**：`HypervisorPresent = True`、VBS = 2、`hypervisorlaunchtype` 仍是默认 `auto`。也就是说 `intelppm!HvRequestIdle` 这条栈当时就在，机器照样没死。**触发点不在 hypervisor 层，而在它下面一层的 package C-state 深度**——这也是为什么第 9 轮（摘 hypervisor）被撤销，不必牺牲 WSL2 / Credential Guard。
 >
+> **sleepstudy 证实了机理，而不只是证实了现象**（`sleepstudy-report.1029.html`）：那段 12 小时会话是 `Type 1` / `ExitReason = Input Mouse` / 电池仅掉 **104 mWh**，而相位分布显示 **`Level 3` 占 99%（blocker `No CS Phase`）——它根本没有下到出事的 `ActivityLevel 4`**。修复前的失效会话则是 `ActivityLevel 4` + `Duration 0` + `ExitReason Unknown`，且**完全没有 blocker 相位数据**（会话压根没关闭）。修复后 7 段待机，没有一段达到 4。
+
 > **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。今天是第 1 天。**当前判定：初步有效，观察中。**
 >
 > ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
@@ -31,7 +33,7 @@
 > `ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死（亮屏）；1 小时 26 分钟后再崩一次，这次是从**待机**（`Type 1`、`CS = true`）进去的；又过 36 分钟第三次，**黑屏状态下按键盘，整机自己复位**（既没蓝屏也没长按电源键）。
 > 三次的 `Type`、`Duration`、是否待机、连「怎么死的」全都不同，**只有 `ActivityLevel 4` 没变**——失效瞬间连电池读数都归了零。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 38 条踩坑记录**——帮你少走这四个月的弯路。
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 39 条踩坑记录**——帮你少走这四个月的弯路。
 >
 > ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 37 documented pitfalls**.*
 
@@ -46,7 +48,7 @@
 >
 > Working hypothesis: the freeze happens inside the **CPU idle-state transition**, managed by the **PEP (Micro Power Engine Plugin, 11 idle states)** and requested through the hypervisor. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
 >
-> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 38 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
+> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 39 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
@@ -281,7 +283,7 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
 | `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：九轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、38 条踩坑<br />**Core doc** — nine rounds of hypotheses and what disproved each, capability limits of 9 data sources, 38 pitfalls |
+| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、39 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 39 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 21 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |

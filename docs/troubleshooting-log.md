@@ -79,7 +79,7 @@
 
 ## 4. 踩坑记录
 
-按「数据解析 → 取证逻辑 → 判断与方案」三类，共 38 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33，第 9 轮第一次尝试失败后新增 P34、P35，第 21 次后新增 P36、P37，第 10 轮评估阶段新增 P38）。**每条都是实际踩到并付出过时间的。**
+按「数据解析 → 取证逻辑 → 判断与方案」三类，共 39 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33，第 9 轮第一次尝试失败后新增 P34、P35，第 21 次后新增 P36、P37，第 10 轮评估阶段新增 P38、P39）。**每条都是实际踩到并付出过时间的。**
 
 > 配套文件：可直接提交 HP 的报修文本见同目录 `warranty-claim.md`。
 
@@ -375,6 +375,24 @@ $ev | Group-Object { $_.TimeCreated.Date } | ForEach-Object {
 
 ---
 
+**P39｜`ActivityLevel = 4` 是「崩溃的必要条件」，不是「充分条件」；判据要连 `BlockerGroups` 一起看。**  
+第 19～21 次之后我们建立了一条经验：**凡 `ExitReason = Unknown` 的会话，`ActivityLevel` 都是 4**。这条本身没错，但后来一度被简化成「看到 4 就是要崩了」，第 10 轮的 sleepstudy 证明这个反向推理不成立。
+
+报告里最老的一条会话 `2026-09-22 16:50:28` 完整具备那套失效签名：`ActivityLevel 4`、`Duration 0`、`ExitReason Unknown`、`ExitRemainingCapacity 0`——**但当天没有任何 `Kernel-Power 41`**（全天无 41、无 6008、无开机事件），之后机器静默了一整个月。
+
+真正能区分「冻死」和「正常」的，是**相位分布有没有拿到**：
+
+| | `ActivityLevel` | `BlockerGroups` 相位 | `Duration` | `ExitReason` |
+| --- | --- | --- | --- | --- |
+| 正常待机 | 0 / 1 | **Level 3 占 99%**（blocker `No CS Phase`） | 秒级到 12 小时 | `Input Mouse` / `MonitorOff` 等 |
+| 冻死 | 4 | **完全为空**（会话压根没关闭，采不到数据） | **0** | `Unknown` |
+
+→ 结论：**看三件事，不看一个数**——`ActivityLevel`、有没有 blocker 相位数据、`ExitRemainingCapacity` 是否归零。三者同时异常才是冻死；只有 `ActivityLevel = 4` 而 blocker 数据完整、容量正常，多半只是"进过最深相位"而已。
+
+（另外，报告保留窗口的**最老一条记录**天然是截断的，`Duration` 必为 0、`ExitReason` 常为 `Unknown`，不要把它当成一次事件计数。）
+
+---
+
 ## 5. 最终技术判断
 
 ### 5.1 故障机理（当前假设）
@@ -619,6 +637,33 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 **顺带得到一个反向结论：虚拟化从头到尾就没被关过。** 第 10 轮生效后的复查显示 `HypervisorPresent = True`、VBS = 2、`hypervisorlaunchtype` 仍是默认 `auto`——也就是说那段 12 小时 03 分的干净待机，是在 **hypervisor 全程运行、`intelppm!HvRequestIdle` 这条栈照常存在**的情况下度过的。真正被关掉的只有 **HVCI（内存完整性）**，那是第 8 轮的遗留，与 hypervisor 本身无关。
 
 这直接推翻了一条长期假设：**触发点不在 hypervisor 的空闲请求上**，而在它下面一层的 package C-state 深度。原计划的第 9 轮（彻底摘掉 hypervisor）因此**不再需要执行**，也不必牺牲 WSL2 / Docker / Credential Guard。
+
+#### 第 10 轮的 sleepstudy 证据（`private/sleepstudy-report.1029.html`，09:32 生成）
+
+报告里那段 12 小时会话的原始字段：
+
+```
+Type                 1            (CsEnter)
+ActivityLevel        1
+EnterReason          Video Idle Timeout
+ExitReason           Input Mouse
+Duration             43388615363   微秒 = 12 小时 03 分
+OnAc                 true
+EntryRemainingCapacity 53534  ->  ExitRemainingCapacity 53430   (12 小时只掉 104 mWh)
+```
+
+**最关键的不是 `ActivityLevel`，而是 `BlockerGroups` 里的相位分布。** 把每个会话的 blocker 按等级聚合后，两类会话的画像分得干干净净：
+
+| 类型 | `ActivityLevel` | Blocker 相位分布 | 时长 | `ExitReason` | 结局 |
+| --- | --- | --- | --- | --- | --- |
+| 正常待机（修复前后都有） | **0 / 1** | **Level 3 占 99%**（blocker：`No CS Phase`） | 秒级～**12 小时** | `Input Mouse` / `Input Keyboard` / `MonitorOff` | 正常关闭 |
+| 失效会话（修复前） | **4** | **无任何 blocker 数据**（会话从未正常关闭） | **0** | `Unknown` | 冻死 / 复位 |
+
+修复后（10-28 17:35 起）全部 7 段待机会话：**没有任何一段的 `ActivityLevel` 达到 4**，全部落在 0 或 1，相位停在 Level 3，且全部正常关闭——包括那段 12 小时。
+
+> **注意一个此前不知道的反例（诚实记录）**：报告里最老的一条会话是 `2026-09-22 16:50:28`，同样带「`ActivityLevel 4` + `Duration 0` + `ExitReason Unknown` + `ExitRemainingCapacity 0`」这套失效签名，但**当天并没有 `Kernel-Power 41`**（09-22 全天无 41 / 6008 / 开机事件），之后机器静默了一整个月。两种可能：它是报告保留窗口边界的截断记录，或者那一次是**在待机中直接被断电/关机**（不是冻死）。
+>
+> 含义：**「崩溃 ⇒ `ActivityLevel 4`」成立；但「`ActivityLevel 4` ⇒ 必然崩溃」不成立。** 所以不能只凭等级做判据，要和 `ExitRemainingCapacity / ExitReason / 是否有 blocker 数据` 一起看。
 
 **状态：初步有效，尚未定论。** 按 P38 的口径，需要 **5 个以上在用日**；今天是第 1 天。上一个「连续 16 个在用日不崩」的历史纪录说明这台机器有能力长时间不出事，所以现在唯一要做的就是继续用、别改任何设置。
 
