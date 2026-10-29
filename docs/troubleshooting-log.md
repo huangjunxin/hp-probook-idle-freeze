@@ -41,7 +41,7 @@
 
 ---
 
-## 2. 九轮结论演进：每一步是被哪条证据推翻的
+## 2. 十轮结论演进：每一步是被哪条证据推翻的
 
 这一节是本文档的核心。排查过程本身就是不断证伪的过程，**保留错误结论的来龙去脉，比只留最终答案有用**。
 
@@ -55,7 +55,8 @@
 | **第 6 轮**     | 报修，可能要换主板                       | 固件级 Fatal + BIOS 已最新 + 电池循环 2 次                                                                                                                                                                                 | 口径过头：**报修 ≠ 换主板**，是让 HP 走「刷固件 → 诊断 → 判定」流程；`DEADBEEF` 更像结构体未初始化，不能据此断言硬件坏 |
 | **第 7 轮** | **空闲电源转换时 PCIe 链路降档后无法唤醒，整机冻死** | ① 亮屏空闲也崩（第 4 轮证据反推）② 全量回溯发现当时已 17 次、横跨 4 个月与 3 个 BIOS 版本 ③ HP 官方社区同型号双机复现，内核栈落在 `intelppm!HvRequestIdle → PepIdleExecute → PpmIdleExecuteTransition → PoIdle → KiIdleLoop` ④ 本机 ASPM = 最大电源节省量 ⑤ 对方唯一有效缓解 = 关闭 ASPM | **2026-10-28 14:12 被推翻**：ASPM 已关闭并回读确认 `0x0/0x0`，电源方案未变、设置未被打回，**4 小时 4 分钟后第 18 次冻死**。故障点不在 PCIe 链路层，嫌疑退回上一层 |
 | **第 8 轮** | **空闲状态转换本身失败，hypervisor 参与其中** | ① ASPM 已排除（见第 7 轮）② 崩溃栈顶部 `HvRequestIdle` 的 `Hv` = **Hypervisor** ③ 本机 VBS 状态 = 2（运行中）、`SecurityServicesRunning` 含 `2`（HVCI） | **2026-10-28 15:14 被推翻**：HVCI 于 14:22 关闭并重启，`HVCI Enabled = 0`、`SecurityServicesRunning` 由 `2,3,4` 变为 `3,4`，**31 分 25 秒后第 19 次冻死**。但注意——HVCI 只是 hypervisor 的一个安全服务，`HypervisorPresent` 仍为 `True`、VBS 仍为 2，**hypervisor 本身从未被排除**，只是"关 HVCI"这条路走不通 |
-| **第 9 轮（当前）** | **CPU 深度空闲状态转换（PEP → 深 C-state）失败，与睡眠无关** | ① 第 19 次拿到崩溃前完整现场：`14:43:28 → 15:14:53` 一段 **Type 0（Active）** 会话，`ActivityLevel = 4`，1885 秒，`ExitReason = Unknown` ② 天然对照：同机同日 `14:22:28 → 14:43:00` 那段 `ActivityLevel = 0`，1231 秒，`ExitReason = Initialization` **正常结束** ③ 全量 21 次里凡 `ExitReason = Unknown` 的异常记录 `ActivityLevel` 全是 4，正常结束的全是 0；第 20 次从待机（`Type 1`）进入、`CS = true`，`ActivityLevel` 仍是 4——**亮屏空闲和待机两条路殊途同归** ④ 这次 `STANDBYIDLE = 0`（从不进待机），`CS = false`——**根本没睡，纯粹是深度空闲** ⑤ `Kernel-Processor-Power` 事件 55：空闲状态由 **Micro Power Engine Plugin（11 状态）** 管理，正是崩溃栈里 `PepIdleExecute` 那一层 ⑥ 冻结瞬间 `ExitRemainingCapacity = 0`（进入时 53626 mWh），连电池都读不到 | 待验证：`scripts/disable-hypervisor.ps1 apply` 摘掉 hypervisor（用户确认不用虚拟化）。**第一次尝试已失败**：15:39 只关 `bcdedit`，15:42 重启后 hypervisor 照起（事件 1 + 153「enabled due to VBS registry configuration」）→ 见 P34，脚本已改为 VBS 注册表 + `bcdedit` 两个开关一起关。仍崩 → BIOS `Extended Idle Power States` 设 `Disable` |
+| **第 9 轮（已撤销）** | **CPU 深度空闲状态转换（PEP → 深 C-state）失败，与睡眠无关** | ① 第 19 次拿到崩溃前完整现场：`14:43:28 → 15:14:53` 一段 **Type 0（Active）** 会话，`ActivityLevel = 4`，1885 秒，`ExitReason = Unknown` ② 天然对照：同机同日 `14:22:28 → 14:43:00` 那段 `ActivityLevel = 0`，1231 秒，`ExitReason = Initialization` **正常结束** ③ 全量 21 次里凡 `ExitReason = Unknown` 的异常记录 `ActivityLevel` 全是 4，正常结束的全是 0；第 20 次从待机（`Type 1`）进入、`CS = true`，`ActivityLevel` 仍是 4——**亮屏空闲和待机两条路殊途同归** ④ 这次 `STANDBYIDLE = 0`（从不进待机），`CS = false`——**根本没睡，纯粹是深度空闲** ⑤ `Kernel-Processor-Power` 事件 55：空闲状态由 **Micro Power Engine Plugin（11 状态）** 管理，正是崩溃栈里 `PepIdleExecute` 那一层 ⑥ 冻结瞬间 `ExitRemainingCapacity = 0`（进入时 53626 mWh），连电池都读不到 | **已撤销，不再是候选**：`apply` 在本机**从未真正执行**（`EnableVBS` 始终为 `1`、`hypervisorlaunchtype` 始终未设置）。而第 10 轮生效后，机器正是在 `HypervisorPresent = True`、VBS = 2、`intelppm!HvRequestIdle` 这条栈照常存在的前提下过了 12 小时 03 分连续待机 → **hypervisor 只是这条路径的「过路人」**，摘掉它既无必要，也要白白牺牲 WSL2 / Credential Guard。另：第一次尝试失败的细节见 P34 |
+| **第 10 轮（当前）** | **BIOS 对 CPU package C-state 深度的约束不足，深空闲转换时平台死锁** | ① 第 9 轮的方向正确，但要再往下一层——不是 hypervisor，而是 PEP 管理的 package C-state 深度 ② BIOS `Extended Idle Power States` 是唯一直接限制该深度的开关 ③ `ActivityLevel 4` 是跨三种失效形态（亮屏冻结 / 待机冻结 / 唤醒即复位）的唯一不变量 ④ 前一日 21 次失效全部发生在进入空闲后 20 分钟内 | 🟢 **初步有效，观察中**：2026-10-28 17:35:27 设为 `Disable` 并重启，至 10-29 14:27 共 **20 小时 52 分零复现**，含一段 **12 小时 03 分**连续连接待机（本机四个月来最长，电池仅掉 104 mWh）。sleepstudy 显示修复后 7 段待机会话**没有一段 `ActivityLevel` 达到 4**，全部停在 `Level 3`（blocker `No CS Phase`）且正常关闭——**不是「没碰上」，是「下不去」**。按 P38 需 5 个以上在用日，现为第 2 个 |
 
 ---
 
@@ -79,7 +80,7 @@
 
 ## 4. 踩坑记录
 
-按「数据解析 → 取证逻辑 → 判断与方案」三类，共 39 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33，第 9 轮第一次尝试失败后新增 P34、P35，第 21 次后新增 P36、P37，第 10 轮评估阶段新增 P38、P39）。**每条都是实际踩到并付出过时间的。**
+按「数据解析 → 取证逻辑 → 判断与方案」三类，共 40 条（4.4 为 10-28 复核与实操阶段补充，含第 18 次后新增的 P29、P30，第 19 次后新增的 P31–P33，第 9 轮第一次尝试失败后新增 P34、P35，第 21 次后新增 P36、P37，第 10 轮评估阶段新增 P38、P39，第 10 轮验证阶段新增 P40）。**每条都是实际踩到并付出过时间的。**
 
 > 配套文件：可直接提交 HP 的报修文本见同目录 `warranty-claim.md`。
 
@@ -393,6 +394,29 @@ $ev | Group-Object { $_.TimeCreated.Date } | ForEach-Object {
 
 ---
 
+**P40｜「我开过这个功能，说明我有需求」——这条推断在排查中会把人带偏，先查实际安装状态再谈需求。**  
+第 10 轮见效后，用户的第一个反应是「虚拟化能不能重新打开，我可能还是要用的（如果我之前开过的话，那就说明有需求）」。这个推理本身很自然：**被动消失 ≠ 主动放弃**，如果一个能力曾经被启用过，多半意味着有人需要它。
+
+但核查下来，这台机器上这个前提根本不成立：
+
+| 项 | 值 | 说明 |
+| --- | --- | --- |
+| `EnableVBS` | `1`，且 `WasEnabledBy = 1` | VBS 是 **Windows 出厂/策略默认开启**的，用户从未主动选择 |
+| `HypervisorPresent` | `True` | hypervisor 因此在跑，但这是 VBS 的副产品 |
+| `hypervisorlaunchtype` | 未设置（默认 `auto`） | 我们那版"关掉它"的脚本**从未执行过** |
+| WSL 发行版 | **从未安装**（无 `Lxss` 键、无 WSL 应用包） | — |
+| `Microsoft-Hyper-V-All` 全套 | **未安装** | — |
+| 近 7 天 `wsl` / `LxssManager` / `vmcompute` / `Hyper-V` 相关事件 | **0 条** | 没有任何使用痕迹 |
+
+→ 两条结论：
+
+1. **"恢复"这个动词是错的。** 从来没有关过的东西不需要恢复。真正被关掉的只有两样——HVCI（已恢复）和 ASPM（仍关，纯功耗项）。hypervisor、VBS、虚拟化平台一直在运行，**第 10 轮的有效性完全不以牺牲虚拟化为代价**。
+2. **"我记得开过所以有需求"要靠证据落地。** 查三样就够：注册表开关的 `WasEnabledBy`（谁开的）、功能列表 `InstallState`（装没装）、发行版/虚拟机清单（用没用过）。三者都指向"没用过"，那需求就是**未来的假设**，不是**过去的证据**。
+
+→ 教训：**排查修好之后，最容易犯的错是因为心里的假设去动一个其实没被改过的东西。** 动手前先跑一遍 `HypervisorPresent` / `EnableVBS` / `WasEnabledBy` / `SecurityServicesRunning`，比对"我们以为关了什么"和"实际关了什么"——这四行输出在第 9 轮已经救过一次（发现 `apply` 从未生效），这次又救了一次。
+
+---
+
 ## 5. 最终技术判断
 
 ### 5.1 故障机理（当前假设）
@@ -687,7 +711,37 @@ EntryRemainingCapacity 53534  ->  ExitRemainingCapacity 53430   (12 小时只掉
 
 **风险提示（写在前面）**：如果接下来几天又崩，需要立刻判断是「BIOS 那步本来就不够」还是「恢复 HVCI 带回了什么」。判据是崩溃前 `SecurityServicesRunning` 是否仍为 `2,3,4`——如果是，HVCI 无辜，问题回到第 10 轮本身。
 
-**状态：初步有效，尚未定论。** 按 P38 的口径，需要 **5 个以上在用日**；今天是第 1 天。上一个「连续 16 个在用日不崩」的历史纪录说明这台机器有能力长时间不出事，所以现在唯一要做的就是继续用、别改任何设置。
+**状态：初步有效，尚未定论。** 按 P38 的口径，需要 **5 个以上在用日**；10-28、10-29 是第 1、2 个在用日。上一个「连续 16 个在用日不崩」的历史纪录说明这台机器有能力长时间不出事，所以现在唯一要做的就是继续用、别改任何设置。
+
+> ### 6.1.3.2 虚拟化核查：从来没关过，因此没有"要不要恢复"这回事
+>
+> （2026-10-29 14:27，用户提出「可能要重新打开虚拟化」后核查）
+>
+> | 项 | 值 | 含义 |
+> | --- | --- | --- |
+> | `HypervisorPresent` | **`True`** | hypervisor 全程在跑 |
+> | `VBS Status` | **`2`**（running） | 虚拟化安全性运行中 |
+> | `EnableVBS` | **`1`** | 总开关从未被关过 |
+> | `hypervisorlaunchtype` | 未设置 = 默认 `auto` | 第 9 轮的 `apply` 从未真正生效 |
+> | `SecurityServicesRunning` | **`2,3,4`** | HVCI 已恢复，VBS 服务完整 |
+> | `WasEnabledBy` | **`1`** | **Windows 默认/策略开启**，不是用户手动开的 |
+>
+> 实际安装的虚拟化能力：
+>
+> | 能力 | 状态 |
+> | --- | --- |
+> | WSL 发行版 | **从未安装**（`HKCU\...\Lxss` 键不存在，WSL 应用包也未安装） |
+> | `Microsoft-Hyper-V-All`（含 Hypervisor / Services / Tools / PowerShell） | **全部未安装** |
+> | `VirtualMachinePlatform` | 已启用（WSL2 的依赖层，但上面没有任何发行版） |
+> | 近 7 天含 `wsl` / `LxssManager` / `vmcompute` / `Hyper-V` 的 Application 事件 | **0 条** |
+>
+> **结论：本机从未真正使用过 WSL2 或 Hyper-V，也没有"为了虚拟化关掉过任何东西"。** 之前的第 9 轮设想（`disable-hypervisor.ps1 apply`）是**计划过但从未执行**的干预，注册表与运行态都证明这一点。所以：
+>
+> 1. **不存在"恢复虚拟化"的操作**——它一直在运行，无需任何改动；
+> 2. 第 10 轮的有效性**完全不以牺牲虚拟化为代价**，两者互不相干；
+> 3. 如果以后要用 WSL2，只需 `wsl --install`（`VirtualMachinePlatform` 已就位）；要用 Hyper-V 虚拟机，再单独启用 `Microsoft-Hyper-V-All`。**这两件事现在就可以做，与本次故障无关。**
+>
+> 顺带一个认知层面的记录：用户"如果之前开过，说明有需求"的推断本身是合理的，但**对这台机器不成立**——`WasEnabledBy = 1` 说明 VBS 是 Windows 出厂默认开的，它带来的 hypervisor 从来没有被用户主动选择过。见 P40。
 
 > **已按此口径判负两次（范例）**：
 > - 第 7 轮 ASPM：基线 `17 次 / 09:33:54` → 10:08 关 ASPM，14:12:20 前进，**4h04m 判负**。

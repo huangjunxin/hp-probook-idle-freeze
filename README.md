@@ -22,8 +22,12 @@
 > **sleepstudy 证实了机理，而不只是证实了现象**（`sleepstudy-report.1029.html`）：那段 12 小时会话是 `Type 1` / `ExitReason = Input Mouse` / 电池仅掉 **104 mWh**，而相位分布显示 **`Level 3` 占 99%（blocker `No CS Phase`）——它根本没有下到出事的 `ActivityLevel 4`**。修复前的失效会话则是 `ActivityLevel 4` + `Duration 0` + `ExitReason Unknown`，且**完全没有 blocker 相位数据**（会话压根没关闭）。修复后 7 段待机，没有一段达到 4。
 
 > **HVCI（内存完整性）已于 2026-10-29 11:18 恢复开启** —— `SecurityServicesRunning` 回到 **`2,3,4`**、`Enabled = 1`。它在 10-28 已被实测证伪（关着也 31 分钟就崩），不是病因，所以不该长期关着。恢复后 `Kernel-Power 41` 仍停在 **21 次 / `2026-10-28 17:17:46`**，4 段待机循环全部正常退出。**ASPM 尚未恢复**（纯功耗项，留到最后）。
+>
+> **虚拟化从头到尾没有被关过**（10-29 14:27 复核）：`HypervisorPresent = True`、VBS = `2`、`EnableVBS = 1`、`hypervisorlaunchtype` 仍是默认 `auto`、`WasEnabledBy = 1`（Windows 默认开启）。本机也**从未安装 WSL 发行版或 Hyper-V**（`Microsoft-Hyper-V-All` 全套未安装，`VirtualMachinePlatform` 已启用但无发行版）。也就是说：**这个修复没有牺牲任何虚拟化能力**，WSL2 与 Hyper-V 随时可用，与故障无关。
 
-> **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。今天是第 1 天。**当前判定：初步有效，观察中。**
+> **截至 2026-10-29 14:27 的进展**：干预后已连续 **20 小时 52 分**零复现（含 12 小时 03 分连续待机），恢复 HVCI 后的一次重启内也干净了 4 小时 50 分、多次正常进出待机。
+>
+> **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。10-28、10-29 是第 **1、2** 个在用日。**当前判定：初步有效，观察中。**
 >
 > ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
 
@@ -35,7 +39,7 @@
 > `ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死（亮屏）；1 小时 26 分钟后再崩一次，这次是从**待机**（`Type 1`、`CS = true`）进去的；又过 36 分钟第三次，**黑屏状态下按键盘，整机自己复位**（既没蓝屏也没长按电源键）。
 > 三次的 `Type`、`Duration`、是否待机、连「怎么死的」全都不同，**只有 `ActivityLevel 4` 没变**——失效瞬间连电池读数都归了零。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 39 条踩坑记录**——帮你少走这四个月的弯路。
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 40 条踩坑记录**——帮你少走这四个月的弯路。
 >
 > ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 37 documented pitfalls**.*
 
@@ -200,11 +204,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 1 | 关闭 PCIe ASPM / *Disable PCIe ASPM* | ❌ **已证伪** — 2026-10-28，`0x0/0x0` 生效 4h04m 后仍崩<br />*Disproved — froze 4 h 4 min after verifying `0x0/0x0`* |
 | 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**；**已于 10-29 11:18 恢复开启**（`2,3,4`）<br />*Disproved — froze again 31 min later; **restored on 10-29 11:18** since it was never the cause* |
 | 3 | 摘掉 hypervisor：**VBS 注册表 + `bcdedit` 两个开关都要关**<br />*Remove the hypervisor: turn off **both** the VBS registry switch and `bcdedit`* | ✅ **不需要了** — 第 10 轮生效后，机器是在 **hypervisor 全程运行**（`HypervisorPresent = True`、VBS = 2）的前提下度过 12 小时连续待机的，说明触发点不在这一层<br />*No longer needed — the 12-hour clean standby happened **with the hypervisor running**, so the trigger is below it* |
-| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | ⏳ **当前步骤** — **2026-10-28 17:35:27 已在 BIOS 中设为 `Disable` 并重启**；直接限制 package C-state 深度，不动虚拟化，代价是续航<br />*Current — set to `Disable` in BIOS on 2026-10-28 17:35:27; caps package C-state depth, costs battery life, leaves virtualisation alone* |
+| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 🟢 **当前步骤 — 20h52m 零复现，含 12h03m 连续待机**：**2026-10-28 17:35:27 已在 BIOS 中设为 `Disable` 并重启**；唯一直接限制 package C-state 深度、且在生效后改变了故障表现的措施，不动虚拟化，代价是续航<br />*Current — 20 h 52 min clean incl. a 12 h standby; set in BIOS 2026-10-28 17:35:27; caps package C-state depth, costs battery life, leaves virtualisation alone* |
 | 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19～21 次现场）/ *Evidence package ready* |
 
-**为什么第 3、4 步都指向 CPU 空闲路径**：HP 社区同型号机的崩溃栈顶部是 `intelppm!HvRequestIdle` —— **`Hv` 就是 Hypervisor**。CPU 进入空闲态这件事本身，是 hypervisor 在发请求。ASPM 关掉无效，恰好说明故障点不在 PCIe 链路层；而本机 `Kernel-Processor-Power` 事件 55 显示空闲状态由 **Micro Power Engine Plugin（11 个状态）**管理，正是崩溃栈里 `PepIdleExecute` 那一层。  
-*Why steps 3–4 point at the CPU idle path: the stack tops out at `intelppm!HvRequestIdle` — **`Hv` = Hypervisor**. And this machine's `Kernel-Processor-Power` event 55 reports idle states managed by the **Micro Power Engine Plugin (11 states)** — exactly the layer `PepIdleExecute` sits in.*
+**为什么答案指向 CPU 空闲路径，而不是 hypervisor**：HP 社区同型号机的崩溃栈顶部是 `intelppm!HvRequestIdle` —— **`Hv` 就是 Hypervisor**，所以第 9 轮一度以为元凶在这一层。**但这个推断错了**：把 BIOS 的深度空闲态关掉之后，机器在 `HypervisorPresent = True`、VBS = 2、`intelppm!HvRequestIdle` 这条栈照常存在的情况下，安然度过了一段 **12 小时 03 分**的连续待机。**hypervisor 只是这条路径的"过路人"，真正的故障点在其下层**——本机 `Kernel-Processor-Power` 事件 55 显示空闲状态由 **Micro Power Engine Plugin（11 个状态）**管理，正是崩溃栈里 `PepIdleExecute` 那一层。  
+*Why the answer points at the CPU idle path, not the hypervisor: the stack tops out at `intelppm!HvRequestIdle` — **`Hv` = Hypervisor** — which is why round 9 blamed that layer. **That was wrong.** After capping package C-state depth in BIOS, the machine ran a **12 h 03 min** standby with `HypervisorPresent = True`, VBS = 2 and the very same `HvRequestIdle` stack in place. The hypervisor merely passes through; the fault is a layer below, where `Kernel-Processor-Power` event 55 shows idle states managed by the **Micro Power Engine Plugin (11 states)** — exactly where `PepIdleExecute` sits.*
 
 ---
 
@@ -217,8 +221,8 @@ Idle → the power manager drops the activity level to 4, the deepest seen in th
 CPU 请求深 C-state —— 由 PEP（Micro Power Engine Plugin，11 个状态）决定进哪一个
 CPU asks for a deep C-state — PEP (Micro Power Engine Plugin, 11 states) picks which one
    ↓
-这条请求经 hypervisor 发出（栈顶 intelppm!HvRequestIdle）
-The request goes through the hypervisor (stack top: intelppm!HvRequestIdle)
+这条请求经 hypervisor 发出（栈顶 intelppm!HvRequestIdle）—— 注意：**"经过"不等于"元凶"**，hypervisor 一直在跑，机器照样能好
+The request goes through the hypervisor (stack top: intelppm!HvRequestIdle) — note: passing through ≠ being the cause; the hypervisor kept running and the machine still recovered
    ↓
 某一次转换卡住，CPU 停在半个状态里，再也回不来
 One transition wedges; the CPU never completes it
@@ -283,9 +287,9 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | 路径 / Path                               | 说明 / Description                                                                                                                                                      |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
-| `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
+| `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出。**⚠️ 现已确认无必要**（见处置表第 3 步）：hypervisor 全程运行并不妨碍修复生效，`apply` 在本机从未执行过，保留它只为记录排查路径<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、39 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 39 pitfalls |
+| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、40 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 39 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 21 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |
