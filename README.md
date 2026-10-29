@@ -1,9 +1,9 @@
 # HP ProBook 4 G1i 14 — Freezes Solid When Idle, No BSOD, No Dump
 
-**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——十轮假设，前九轮都被证据推翻，第十轮（BIOS 关掉深度空闲态）初步有效。**  
-*A real-machine investigation into a Windows 11 idle hard-freeze — nine hypotheses, each disproved by evidence, and a tenth (disabling deep idle power states in BIOS) that has now held through a 12-hour standby session.*
+**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——十轮假设，前九轮都被证据推翻，第十轮（BIOS 关掉深度空闲态）在 25 小时、42 次待机进出中零复现。**  
+*A real-machine investigation into a Windows 11 idle hard-freeze — nine hypotheses, each disproved by evidence, and a tenth (disabling deep idle power states in BIOS) that has now survived 42 standby cycles in 25 hours, including one 12-hour session.*
 
-> ### 🟢 最新（2026-10-29 09:25）：第 10 轮干预后 15 小时 50 分，零复现
+> ### 🟢 最新（2026-10-29 19:08）：第 10 轮干预后 25 小时 33 分，42 次待机进出全部正常
 >
 > 干预内容：BIOS 里 **`Extended Idle Power States` = `Disable`**（本机 `X72 01.05.04`），2026-10-28 17:35:27 生效。这是唯一直接限制 **package C-state 深度**的开关，正对着唯一不变量 `ActivityLevel 4`。
 >
@@ -20,6 +20,10 @@
 > **而且这一切是在虚拟化完全没动的前提下发生的**：`HypervisorPresent = True`、VBS = 2、`hypervisorlaunchtype` 仍是默认 `auto`。也就是说 `intelppm!HvRequestIdle` 这条栈当时就在，机器照样没死。**触发点不在 hypervisor 层，而在它下面一层的 package C-state 深度**——这也是为什么第 9 轮（摘 hypervisor）被撤销，不必牺牲 WSL2 / Credential Guard。
 >
 > **sleepstudy 证实了机理，而不只是证实了现象**（`sleepstudy-report.1029.html`）：那段 12 小时会话是 `Type 1` / `ExitReason = Input Mouse` / 电池仅掉 **104 mWh**，而相位分布显示 **`Level 3` 占 99%（blocker `No CS Phase`）——它根本没有下到出事的 `ActivityLevel 4`**。修复前的失效会话则是 `ActivityLevel 4` + `Duration 0` + `ExitReason Unknown`，且**完全没有 blocker 相位数据**（会话压根没关闭）。修复后 7 段待机，没有一段达到 4。
+>
+> **累计暴露量（19:08 按事件日志统计）**：干预后共 **42 次**进入连接待机、**42 次**正常退出（`Kernel-Power 506/507` 一一配对，无一缺失），累计待机时长约 **21 小时 30 分**——这 25.5 小时里**有 84% 的时间机器处在待机状态**，不是「只在有人用的时候才没崩」。单段最长 12 小时 03 分，其次是 71 / 47 / 46 / 39 / 37 分钟。
+>
+> **和发作期比密度，比和日历比天数更有说服力**：10-28 后半段四次崩溃的间隔是 **63 / 86 / 37 分钟**（平均 62 分钟），而且趋势是**越来越密、没有收敛迹象**。按这个密度，25 小时 33 分 ≈ **25 个「预期崩溃窗口」**，实际发生 0 次。
 
 > **HVCI（内存完整性）已于 2026-10-29 11:18 恢复开启** —— `SecurityServicesRunning` 回到 **`2,3,4`**、`Enabled = 1`。它在 10-28 已被实测证伪（关着也 31 分钟就崩），不是病因，所以不该长期关着。恢复后 `Kernel-Power 41` 仍停在 **21 次 / `2026-10-28 17:17:46`**，4 段待机循环全部正常退出。
 >
@@ -28,9 +32,11 @@
 >
 > **虚拟化从头到尾没有被关过**（10-29 14:27 复核）：`HypervisorPresent = True`、VBS = `2`、`EnableVBS = 1`、`hypervisorlaunchtype` 仍是默认 `auto`、`WasEnabledBy = 1`（Windows 默认开启）。本机也**从未安装 WSL 发行版或 Hyper-V**（`Microsoft-Hyper-V-All` 全套未安装，`VirtualMachinePlatform` 已启用但无发行版）。也就是说：**这个修复没有牺牲任何虚拟化能力**，WSL2 与 Hyper-V 随时可用，与故障无关。
 
-> **截至 2026-10-29 14:40 的进展**：干预后已连续 **21 小时 04 分**零复现（含 12 小时 03 分连续待机），恢复 HVCI 后的这次重启也已干净 **5 小时 02 分**、多次正常进出待机。同一天内还把 ASPM 也还原成了出厂值（`0x2`），**Windows 侧偏离项至此清零**。
+> **截至 2026-10-29 19:08 的进展**：干预后连续 **25 小时 33 分**零复现（`Kernel-Power 41` / `6008` / `1001` 全为 0，总数仍 21、最近一次仍是 `2026-10-28 17:17:46`），含 42 次正常待机进出、累计 21 小时 30 分待机时长。同一天内还把 HVCI 与 ASPM 都还原成了出厂值，**Windows 侧偏离项至此清零**。
 >
-> **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。10-28、10-29 是第 **1、2** 个在用日。**当前判定：初步有效，观察中。**
+> **现在能说到什么程度**：可以说「**这次干预有效，置信度高**」——它在发作期最陡的那一段把崩溃密度切断了，并且扛住了 42 次待机（含一整段 12 小时）。但**还不能说「已解决」**，原因是两条：① 历史干净期是 **443 次**待机（`08-27 → 09-22`，16 个在用日），当前 42 次还差一个量级；② **这 25.5 小时全程接电源**（`BatteryStatus = 2`，96%），**电池供电下的深度空闲一次都没覆盖过**。
+>
+> **所以判据从「5 个在用日」改成两条硬指标**——天数是代理，暴露量才是本体：① 累计待机次数达到 **200+**；② 至少跑过一次**电池供电**下的深度空闲（拔电源、不合盖、亮屏放着 30–40 分钟，复刻第 19 次现场）。两条都过，就不必再等日历。
 >
 > ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
 
