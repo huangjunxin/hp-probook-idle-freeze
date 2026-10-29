@@ -7,13 +7,18 @@
      保留本脚本的用途是：① 帮你排除这个变量  ② 随时回读当前档位。
      不要指望 apply 之后问题就消失 —— 详见 docs/troubleshooting-log.md 第 8 轮。
 
+  📌 2026-10-29 14:35：本机已执行 revert，ASPM 回到出厂默认 0x2（AC + DC 均已回读确认）。
+     本机真正的修复是 BIOS 里的 Extended Idle Power States = Disable，与本脚本无关。
+     现在再跑 apply 只会让 PCIe 链路常开、白耗电，不会改善故障。
+     另外：实测普通用户即可修改「当前」电源方案，不必以管理员身份运行（见 P42）。
+
   用法（必须以管理员身份运行，在仓库根目录执行）：
       powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 status
       powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 apply
       powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert
 
   apply  = ASPM 关闭（交流 + 电池），并关闭快速启动
-  revert = ASPM 恢复为“最大电源节省量”(2)
+  revert = ASPM 恢复为「最大电源节省量」(2)
 
   注意：apply 只改「当前电源方案」。切换电源方案后设置不会跟过去（方案间互不继承），
         需要对新方案再执行一次 apply。改完务必跑 status 回读确认两个值都是 0x0。
@@ -58,7 +63,7 @@ function Get-AspmName([string]$hex) {
     switch ($hex) {
         '0x00000000' { '关闭  <- 缓解措施要的就是这个' }
         '0x00000001' { '中等电源节省量' }
-        '0x00000002' { '最大电源节省量（最激进，故障机通常停在这一档）' }
+        '0x00000002' { '最大电源节省量（Windows 出厂默认值；本机已恢复到此档）' }
         default      { $hex }
     }
 }
@@ -141,13 +146,16 @@ function Invoke-Apply {
 }
 
 function Invoke-Revert {
-    Write-Host "恢复 PCIe 链接状态电源管理为“最大电源节省量”(2)..."
+    Write-Host "恢复 PCIe 链接状态电源管理为「最大电源节省量」(2)..."
     powercfg /setacvalueindex SCHEME_CURRENT $SUB_PCIEXPRESS $ASPM 2
     powercfg /setdcvalueindex SCHEME_CURRENT $SUB_PCIEXPRESS $ASPM 2
     powercfg /setactive SCHEME_CURRENT
     $a = Get-PowerValue $SUB_PCIEXPRESS $ASPM
     Write-Host ("  接电源 : " + (Get-AspmName $a.AC))
     Write-Host ("  用电池 : " + (Get-AspmName $a.DC))
+    if ($a.AC -ne '0x00000002' -or $a.DC -ne '0x00000002') {
+        Write-Host "回读值与预期 (0x00000002) 不一致——请用「终端(管理员)」重跑本命令。若刚切换过电源方案，也要重跑（方案间不继承）。" -ForegroundColor Yellow
+    }
 }
 
 if ($Mode -eq 'status') {
@@ -155,10 +163,10 @@ if ($Mode -eq 'status') {
     exit 0
 }
 
+# 2026-10-29 实测（P42）：powercfg 修改「当前」电源方案并不需要管理员权限。
+# 因此这里不再硬性拦截，只在非管理员时提示一句——真正的判据是执行后的回读值。
 if (-not (Test-Admin)) {
-    Write-Host "需要管理员权限。请用“终端(管理员)”重新运行：" -ForegroundColor Yellow
-    Write-Host ('  powershell -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" ' + $Mode)
-    exit 1
+    Write-Host "提示：当前会话非管理员。本机实测修改当前电源方案无需提权，将直接尝试；若回读值没变化，再用管理员终端重跑。" -ForegroundColor Yellow
 }
 
 switch ($Mode) {
