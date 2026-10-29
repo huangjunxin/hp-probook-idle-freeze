@@ -21,6 +21,8 @@
 >
 > **sleepstudy 证实了机理，而不只是证实了现象**（`sleepstudy-report.1029.html`）：那段 12 小时会话是 `Type 1` / `ExitReason = Input Mouse` / 电池仅掉 **104 mWh**，而相位分布显示 **`Level 3` 占 99%（blocker `No CS Phase`）——它根本没有下到出事的 `ActivityLevel 4`**。修复前的失效会话则是 `ActivityLevel 4` + `Duration 0` + `ExitReason Unknown`，且**完全没有 blocker 相位数据**（会话压根没关闭）。修复后 7 段待机，没有一段达到 4。
 
+> **HVCI（内存完整性）已于 2026-10-29 11:18 恢复开启** —— `SecurityServicesRunning` 回到 **`2,3,4`**、`Enabled = 1`。它在 10-28 已被实测证伪（关着也 31 分钟就崩），不是病因，所以不该长期关着。恢复后 `Kernel-Power 41` 仍停在 **21 次 / `2026-10-28 17:17:46`**，4 段待机循环全部正常退出。**ASPM 尚未恢复**（纯功耗项，留到最后）。
+
 > **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。今天是第 1 天。**当前判定：初步有效，观察中。**
 >
 > ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
@@ -196,7 +198,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | --- | --- | --- |
 | 0 | 升级到最新 BIOS（`X72 01.05.04`）/ *Latest BIOS* | ❌ **已证伪** — 刷后 58 分钟复现<br />*Disproved — froze 58 min after flashing* |
 | 1 | 关闭 PCIe ASPM / *Disable PCIe ASPM* | ❌ **已证伪** — 2026-10-28，`0x0/0x0` 生效 4h04m 后仍崩<br />*Disproved — froze 4 h 4 min after verifying `0x0/0x0`* |
-| 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**<br />*Disproved — disabled and verified `Enabled = 0`, froze again 31 min later (19th)* |
+| 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**；**已于 10-29 11:18 恢复开启**（`2,3,4`）<br />*Disproved — froze again 31 min later; **restored on 10-29 11:18** since it was never the cause* |
 | 3 | 摘掉 hypervisor：**VBS 注册表 + `bcdedit` 两个开关都要关**<br />*Remove the hypervisor: turn off **both** the VBS registry switch and `bcdedit`* | ✅ **不需要了** — 第 10 轮生效后，机器是在 **hypervisor 全程运行**（`HypervisorPresent = True`、VBS = 2）的前提下度过 12 小时连续待机的，说明触发点不在这一层<br />*No longer needed — the 12-hour clean standby happened **with the hypervisor running**, so the trigger is below it* |
 | 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | ⏳ **当前步骤** — **2026-10-28 17:35:27 已在 BIOS 中设为 `Disable` 并重启**；直接限制 package C-state 深度，不动虚拟化，代价是续航<br />*Current — set to `Disable` in BIOS on 2026-10-28 17:35:27; caps package C-state depth, costs battery life, leaves virtualisation alone* |
 | 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19～21 次现场）/ *Evidence package ready* |
