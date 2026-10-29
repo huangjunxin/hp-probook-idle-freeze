@@ -603,6 +603,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 > 1. **故障是"发作期"式的，不是每次空闲都掷骰子**——所以一晚干净说明不了什么，一晚是 5–10 次待机进入，只是那 443 次的 2%。
 > 2. 真正有分量的判据有两个：**连续 5 个以上在用日不出 41**（历史最好 16 天），以及下一次 sleepstudy 里长待机会话 `ActivityLevel` 为 **0** 而非 4。
 
+> **第 10 轮过夜记录（2026-10-29 09:25，生效后 15 小时 50 分）**：零 `41`、零 `6008`、零 `1001`，期间**没有重启过**（uptime 连续 15h50m）。整夜的待机进出全部正常退出：
+
+| 进入 | 退出 | 时长 | 结果 |
+| --- | --- | --- | --- |
+| 10-28 21:22:06 | **10-29 09:25:17** | **12 小时 03 分** | 正常唤醒（`Kernel-Power 507`，`reason=32`），无复位 |
+| 10-28 19:55:42 | 10-28 21:06:33 | 70 分 | 正常 |
+| 10-28 19:11:32 | 10-28 19:11:48 | 16 秒 | 正常 |
+| 10-28 17:59:56 / 18:47:41 / 18:50:32 | 各自退出 | 2～47 分 | 全部正常 |
+
+**为什么这段比"一晚上没崩"重得多**：故障的发作窗口很短——第 20 次是进待机约 **3 分钟**后开始静默、20 分钟后整机已死；第 18 次约 25 分钟后静默。也就是说只要真的落到 `ActivityLevel 4`，**20 分钟内就会出事**。而这次一段 **12 小时**的连续深待机安然退出，暴露时长是原窗口的 30 倍以上。这不是"没碰上"，是**这条路径确实被改变了**。
+
+整夜唯一的 error 级事件是 `LanguagePackSetup`（1 条，与本故障无关），无 WHEA 新增。
+
+**状态：初步有效，尚未定论。** 按 P38 的口径，需要 **5 个以上在用日**；今天是第 1 天。上一个「连续 16 个在用日不崩」的历史纪录说明这台机器有能力长时间不出事，所以现在唯一要做的就是继续用、别改任何设置。
+
 > **已按此口径判负两次（范例）**：
 > - 第 7 轮 ASPM：基线 `17 次 / 09:33:54` → 10:08 关 ASPM，14:12:20 前进，**4h04m 判负**。
 > - 第 8 轮 HVCI：基线 `18 次 / 14:12:20` → 14:22 关 HVCI，15:14:53 前进，**31m25s 判负**。
@@ -621,7 +636,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 1 | `fix-idle-hang.ps1 apply` → ASPM 设为「关闭」（AC+DC）                                                                    | ❌ **已证伪**（10-28 10:08 关闭并验证 `0x0/0x0`，14:12 第 18 次冻死）                 |
 | 2 | 关闭内存完整性（HVCI），重启观察                                                                                              | ❌ **已证伪**（14:22 关闭重启，`Enabled = 0` 回读确认，15:14 第 19 次冻死）            |
 | 3 | `disable-hypervisor.ps1 apply` → **同时**关 VBS 注册表开关与 `hypervisorlaunchtype`，重启观察                          | ⏸️ **暂缓，被第 4 步抢先**：第一次只关了 `bcdedit`，被 VBS 架空（P34），升级后的 `apply` 从未执行。第 4 步更贴靶心且不牺牲虚拟化，故先走第 4 步；第 4 步判负后再回来执行它  |
-| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | ⏳ **当前步骤（10-28 17:35:27 生效）**：BIOS `X72 01.05.04` 中已设 `Disable` 并重启。**直接限制 package C-state 深度**，代价是续航变差，不影响虚拟化 |
+| 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | 🟢 **当前步骤（10-28 17:35:27 生效）— 15h50m 零复现，含 12h03m 连续待机**：BIOS `X72 01.05.04` 中已设 `Disable`。**直接限制 package C-state 深度**，代价是续航变差，不影响虚拟化。**观察中，需 5 个以上在用日** |
 | 5 | 报修（材料见 `warranty-claim.md`）                                                                                     | 材料已备，含第 19 次现场                                                          |
 
 **第 3、4 步为什么都指向 CPU 空闲路径**：崩溃栈顶部是 `intelppm!HvRequestIdle`，`Hv` = **Hypervisor**；本机 `Kernel-Processor-Power` 事件 55 又显示空闲状态由 **Micro Power Engine Plugin（11 个状态）** 管理——正是栈里 `PepIdleExecute` 那一层。ASPM 和 HVCI 被排除之后，只剩这条链。

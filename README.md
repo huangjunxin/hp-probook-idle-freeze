@@ -1,9 +1,27 @@
 # HP ProBook 4 G1i 14 — Freezes Solid When Idle, No BSOD, No Dump
 
-**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——九轮假设，每轮都被证据推翻。**  
-*A real-machine investigation into a Windows 11 idle hard-freeze — nine rounds of hypotheses, each one disproved by evidence. **Still unsolved.***
+**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——十轮假设，前九轮都被证据推翻，第十轮（BIOS 关掉深度空闲态）初步有效。**  
+*A real-machine investigation into a Windows 11 idle hard-freeze — nine hypotheses, each disproved by evidence, and a tenth (disabling deep idle power states in BIOS) that has now held through a 12-hour standby session.*
 
-> ### ⚠️ 当前状态（2026-10-28 17:17）：21 次，没有找到有效解
+> ### 🟢 最新（2026-10-29 09:25）：第 10 轮干预后 15 小时 50 分，零复现
+>
+> 干预内容：BIOS 里 **`Extended Idle Power States` = `Disable`**（本机 `X72 01.05.04`），2026-10-28 17:35:27 生效。这是唯一直接限制 **package C-state 深度**的开关，正对着唯一不变量 `ActivityLevel 4`。
+>
+> 此后经历的空闲暴露——**是这台机器四个月来最长的一段**：
+>
+> | 进入连接待机 | 退出 | 时长 | 结果 |
+> | --- | --- | --- | --- |
+> | 10-28 21:22:06 | 10-29 09:25:17 | **12 小时 03 分** | 正常唤醒，无复位 |
+> | 10-28 19:55:42 | 10-28 21:06:33 | 70 分 | 正常 |
+> | 10-28 17:59 / 18:47 / 18:50 / 19:11 | 各自退出 | 2～47 分 | 全部正常 |
+>
+> **对照很关键**：第 20 次是进入待机约 3 分钟后开始静默、20 分钟后整机已死；第 18 次约 25 分钟。而这次一段 12 小时的深空闲安然退出——**远超原来 20 分钟就出事的窗口**。
+>
+> **但仍不能宣布「已解决」**：按本仓库自己的口径（P38），这台机器历史上曾连续 16 个在用日不崩，所以初步结论要 **5 个以上在用日**。今天是第 1 天。**当前判定：初步有效，观察中。**
+>
+> ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
+
+> ### ⚠️ 干预之前的状态（2026-10-28 17:17）：21 次，没有找到有效解
 >
 > 三项干预已全部被证伪：**最新 BIOS**（刷后 58 分钟复现）、**关闭 PCIe ASPM**（回读确认 `0x0/0x0`，4 小时 4 分钟后冻死）、**关闭内存完整性 HVCI**（回读确认 `Enabled = 0`，31 分钟后冻死）。
 >
@@ -22,11 +40,11 @@
 >
 > This repo documents a HP ProBook 4 G1i 14 inch Notebook AI PC (Intel Core Ultra, Windows 11 25H2 build 26200) that **hard-freezes when idle**: screen on, no apps running, ~4 W package power, then the whole machine locks up — mouse and keyboard dead, no blue screen, no reboot, no crash dump. Every occurrence leaves exactly one `Kernel-Power 41` event with `BugcheckCode = 0`.
 >
-> **19 occurrences** between 2026-07-08 and 2026-10-28, spanning **3 BIOS versions** — and **6 of them happened while the machine was not in Modern Standby at all** (plain screen-on idle).
+> **21 occurrences** between 2026-07-08 and 2026-10-28, spanning **3 BIOS versions** — and **7 of them happened while the machine was not in Modern Standby at all** (plain screen-on idle).
 >
 > Working hypothesis: the freeze happens inside the **CPU idle-state transition**, managed by the **PEP (Micro Power Engine Plugin, 11 idle states)** and requested through the hypervisor. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
 >
-> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — nine rounds of hypotheses, each one and what disproved it, plus 33 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
+> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 38 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
