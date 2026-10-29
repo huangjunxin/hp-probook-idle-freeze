@@ -34,9 +34,11 @@
 
 > **截至 2026-10-29 19:08 的进展**：干预后连续 **25 小时 33 分**零复现（`Kernel-Power 41` / `6008` / `1001` 全为 0，总数仍 21、最近一次仍是 `2026-10-28 17:17:46`），含 42 次正常待机进出、累计 21 小时 30 分待机时长。同一天内还把 HVCI 与 ASPM 都还原成了出厂值，**Windows 侧偏离项至此清零**。
 >
-> **现在能说到什么程度**：可以说「**这次干预有效，置信度高**」——它在发作期最陡的那一段把崩溃密度切断了，并且扛住了 42 次待机（含一整段 12 小时）。但**还不能说「已解决」**，原因是两条：① 历史干净期是 **443 次**待机（`08-27 → 09-22`，16 个在用日），当前 42 次还差一个量级；② **这 25.5 小时全程接电源**（`BatteryStatus = 2`，96%），**电池供电下的深度空闲一次都没覆盖过**。
+> **现在能说到什么程度**：可以说「**这次干预有效，置信度高**」——它在发作期最陡的那一段把崩溃密度切断了，并且扛住了 42 次待机（含一整段 12 小时）。唯一还差的是**暴露量**：历史干净期是 **443 次**待机（`08-27 → 09-22`，16 个在用日），当前 42 次还差一个量级。
 >
-> **所以判据从「5 个在用日」改成两条硬指标**——天数是代理，暴露量才是本体：① 累计待机次数达到 **200+**；② 至少跑过一次**电池供电**下的深度空闲（拔电源、不合盖、亮屏放着 30–40 分钟，复刻第 19 次现场）。两条都过，就不必再等日历。
+> **「接电源还是用电池」不是变量，这条已经查清**（10-29 19:15 复核事件日志）：21 次里**至少有 2 次是电池供电下崩的**（#10 `08-26 10:13:03`、#11 `08-26 11:44:52`——08-25 20:56 拔电、08-26 11:44 才插回，机器全程在跑）；反向也有：`08-27 18:30 → 08-28 09:40` 约 **15 小时纯电池运行**落在 16 天干净期内、零崩溃。**两个方向都有样本**，所以不需要专门去测电池场景。
+>
+> **判据**：累计待机次数达到 **200+**，且 ≥20 分钟的深度空闲段全部正常退出（目前 12 段）。天数只是代理，暴露量才是本体。
 >
 > ***Latest (2026-10-29 09:25): 15 h 50 min with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then the machine has been through its longest idle exposure in four months, including a single **12 h 03 min** connected-standby session that woke up normally (the 20th crash went silent ~3 min after entering standby and was dead within 20). **Not declared fixed yet** — by this repo's own P38 rule, a machine that once ran 16 consecutive on-days without a freeze needs 5+ on-days to call it. Day 1.*
 
@@ -48,7 +50,7 @@
 > `ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死（亮屏）；1 小时 26 分钟后再崩一次，这次是从**待机**（`Type 1`、`CS = true`）进去的；又过 36 分钟第三次，**黑屏状态下按键盘，整机自己复位**（既没蓝屏也没长按电源键）。
 > 三次的 `Type`、`Duration`、是否待机、连「怎么死的」全都不同，**只有 `ActivityLevel 4` 没变**——失效瞬间连电池读数都归了零。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 42 条踩坑记录**——帮你少走这四个月的弯路。
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 43 条踩坑记录**——帮你少走这四个月的弯路。
 >
 > ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 37 documented pitfalls**.*
 
@@ -63,7 +65,7 @@
 >
 > Working hypothesis: the freeze happens inside the **CPU idle-state transition**, managed by the **PEP (Micro Power Engine Plugin, 11 idle states)** and requested through the hypervisor. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
 >
-> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 42 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
+> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 43 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
@@ -319,7 +321,7 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
 | `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出。**⚠️ 现已确认无必要**（见处置表第 3 步）：hypervisor 全程运行并不妨碍修复生效，`apply` 在本机从未执行过，保留它只为记录排查路径<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、42 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 42 pitfalls |
+| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、43 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 43 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 21 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |
