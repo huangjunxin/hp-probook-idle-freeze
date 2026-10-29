@@ -459,7 +459,7 @@ CPU 请求深 C-state —— PEP（Micro Power Engine Plugin，11 个状态）�
 | --------------------------------- | ------------------------------------- | ----------------------------------------------------- |
 | **PCIe 链接状态电源管理 (ASPM)**          | `0x0` / `0x0` = 关闭（AC + DC）           | ❌ **已证伪**：10-28 10:08 改好并回读验证，**4h04m 后第 18 次冻死**   |
 | **内存完整性 (HVCI)**                   | **已关闭**（`Enabled = 0`；`SecurityServicesRunning` = `3,4`） | ❌ **已证伪**：14:22 关闭重启，**31m25s 后第 19 次冻死**            |
-| **hypervisor**                    | 17:20 复查（第 21 次之后）：`HypervisorPresent = True`、VBS = 2、`EnableVirtualizationBasedSecurity = 1`（**仍为 1**）、`WasEnabledBy = 1`、`RequirePlatformSecurityFeatures = 3`。15:39 那次 `apply` 只动了 `bcdedit`，且回读因 `bcdedit /enum {current}` 报错而失真，**BCD 实际值至今未能确认** | ⏳ **第 9 轮实质上还没开始**：`EnableVBS` 仍是 1 说明升级后的 `apply`（会同时关 VBS）**从未执行过**。所以第 20、21 次都不是「第 9 轮失败」，是**在干预完全没生效的状态下又崩了两次** |
+| **hypervisor**                    | 10-29 09:25 复查：`HypervisorPresent = True`、VBS = 2、`EnableVirtualizationBasedSecurity = 1`、`hypervisorlaunchtype` 未设置（= `auto`）、`SecurityServicesRunning = 3,4`（**HVCI 仍是关的**，`Enabled = 0`） | ✅ **第 9 轮已无必要，可撤销**：那 12 小时 03 分的干净待机**是在 hypervisor 全程运行的情况下度过的**——`intelppm!HvRequestIdle` 这条栈当时就在，却没有失效。说明触发点不在 hypervisor 的空闲请求上，而在更下面的 package C-state 深度。**不必再摘 hypervisor，也就不必牺牲 WSL2 / Credential Guard** |
 | 待机超时 `STANDBYIDLE`               | `0` / `0` = **从不进入待机**                | 关键：第 19 次全程未进待机照样冻死，说明与睡眠无关                          |
 | 快速启动（HiberbootEnabled）            | `1` = 开启                              | 未改（可选，非核心）                                            |
 | 关屏超时 `VIDEOIDLE`                  | AC = 300 s / DC = 180 s                | 与崩溃无关（第 19 次亮屏时冻死）                                    |
@@ -616,6 +616,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 
 整夜唯一的 error 级事件是 `LanguagePackSetup`（1 条，与本故障无关），无 WHEA 新增。
 
+**顺带得到一个反向结论：虚拟化从头到尾就没被关过。** 第 10 轮生效后的复查显示 `HypervisorPresent = True`、VBS = 2、`hypervisorlaunchtype` 仍是默认 `auto`——也就是说那段 12 小时 03 分的干净待机，是在 **hypervisor 全程运行、`intelppm!HvRequestIdle` 这条栈照常存在**的情况下度过的。真正被关掉的只有 **HVCI（内存完整性）**，那是第 8 轮的遗留，与 hypervisor 本身无关。
+
+这直接推翻了一条长期假设：**触发点不在 hypervisor 的空闲请求上**，而在它下面一层的 package C-state 深度。原计划的第 9 轮（彻底摘掉 hypervisor）因此**不再需要执行**，也不必牺牲 WSL2 / Docker / Credential Guard。
+
 **状态：初步有效，尚未定论。** 按 P38 的口径，需要 **5 个以上在用日**；今天是第 1 天。上一个「连续 16 个在用日不崩」的历史纪录说明这台机器有能力长时间不出事，所以现在唯一要做的就是继续用、别改任何设置。
 
 > **已按此口径判负两次（范例）**：
@@ -635,7 +639,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 0 | BIOS 升级到 `X72 01.05.04`（HP 当前最新）                                                                                    | ❌ **已证伪**（刷后 58 分钟即复现）                                                    |
 | 1 | `fix-idle-hang.ps1 apply` → ASPM 设为「关闭」（AC+DC）                                                                    | ❌ **已证伪**（10-28 10:08 关闭并验证 `0x0/0x0`，14:12 第 18 次冻死）                 |
 | 2 | 关闭内存完整性（HVCI），重启观察                                                                                              | ❌ **已证伪**（14:22 关闭重启，`Enabled = 0` 回读确认，15:14 第 19 次冻死）            |
-| 3 | `disable-hypervisor.ps1 apply` → **同时**关 VBS 注册表开关与 `hypervisorlaunchtype`，重启观察                          | ⏸️ **暂缓，被第 4 步抢先**：第一次只关了 `bcdedit`，被 VBS 架空（P34），升级后的 `apply` 从未执行。第 4 步更贴靶心且不牺牲虚拟化，故先走第 4 步；第 4 步判负后再回来执行它  |
+| 3 | `disable-hypervisor.ps1 apply` → **同时**关 VBS 注册表开关与 `hypervisorlaunchtype`，重启观察                          | ✅ **不再需要**：第 10 轮生效后，机器在 **hypervisor 全程运行**（`HypervisorPresent = True`、VBS = 2）的前提下过了 12 小时连续待机——触发点不在 hypervisor 层。摘掉它既无必要，也要白白牺牲 WSL2 / Credential Guard  |
 | 4 | BIOS 里 `Extended Idle Power States` 设 `Disable`；或 HP 应用 System Control 从 Smart Sense 改 High Performance            | 🟢 **当前步骤（10-28 17:35:27 生效）— 15h50m 零复现，含 12h03m 连续待机**：BIOS `X72 01.05.04` 中已设 `Disable`。**直接限制 package C-state 深度**，代价是续航变差，不影响虚拟化。**观察中，需 5 个以上在用日** |
 | 5 | 报修（材料见 `warranty-claim.md`）                                                                                     | 材料已备，含第 19 次现场                                                          |
 
