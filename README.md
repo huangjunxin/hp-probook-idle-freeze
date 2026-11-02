@@ -1,9 +1,9 @@
 # HP ProBook 4 G1i 14 — Freezes Solid When Idle, No BSOD, No Dump
 
-**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——十轮假设，前九轮都被证据推翻，第十轮（BIOS 关掉深度空闲态）在 41 小时、51 次待机进出、累计 36 小时 39 分实际待机中零复现。**  
-*A real-machine investigation into a Windows 11 idle hard-freeze — nine hypotheses, each disproved by evidence, and a tenth (disabling deep idle power states in BIOS) that has now survived 51 standby cycles and 36.6 hours of actual standby time across 41 hours, including 12- and 14-hour sessions.*
+**HP ProBook 4 G1i 14 笔记本「一闲就死」的完整排查记录——十轮假设，前九轮都被证据推翻，第十轮（BIOS 关掉深度空闲态）在 113 小时、81 次待机进出、累计 42 小时 31 分实际待机中零复现，故障消失。**  
+*A real-machine investigation into a Windows 11 idle hard-freeze — nine hypotheses, each disproved by evidence, and a tenth (disabling deep idle power states in BIOS) that ended it: 113 hours, 81 standby cycles, 42.5 hours actually spent in standby, zero freezes.*
 
-> ### 🟢 最新（2026-10-30 10:30）：第 10 轮干预后 40 小时 55 分，51 次待机进出全部正常，累计待机 36 小时 39 分
+> ### 🟢 结论（2026-11-02 11:04）：第 10 轮干预后 113 小时 29 分，81 次待机进出全部正常，故障未再出现
 >
 > 干预内容：BIOS 里 **`Extended Idle Power States` = `Disable`**（本机 `X72 01.05.04`），2026-10-28 17:35:27 生效。这是唯一直接限制 **package C-state 深度**的开关，正对着唯一不变量 `ActivityLevel 4`。
 >
@@ -14,7 +14,8 @@
 > | 10-29 19:15:58 | 10-30 09:40:43 | **14 小时 25 分** | 正常唤醒（`Input Keyboard`） |
 > | 10-28 21:22:06 | 10-29 09:25:17 | **12 小时 03 分** | 正常唤醒（`Input Mouse`） |
 > | 10-28 19:55:42 | 10-28 21:06:33 | 71 分 | 正常 |
-> | 其余 48 段 | 各自退出 | 1～46 分 | 全部正常 |
+> | 10-30 13:10:34 | 10-30 14:18:08 | 68 分 | 正常 |
+> | 其余 77 段 | 各自退出 | 1～51 分 | 全部正常 |
 >
 > **对照很关键**：第 20 次是进入待机约 3 分钟后开始静默、20 分钟后整机已死；第 18 次约 25 分钟。而这两段 12 / 14.4 小时的深空闲安然退出——**是原来那张「20 分钟死亡时刻表」的 36～43 倍**。
 >
@@ -22,11 +23,13 @@
 >
 > **sleepstudy 证实了机理，而不只是证实了现象**（`sleepstudy-report.1030.html`，覆盖 `10-22 → 10-30` 共 **179 段**会话）：`ActivityLevel = 4` 在整份报告里只出现 **18 次**，**最后一段恰好就是第 21 次崩溃本身**（`10-28 17:17:46`），**干预之后 0 段**。修复后的 51 段待机会话全部落在 `ActivityLevel 0`（32 段）/ `1`（19 段），`ExitReason` 清一色是输入唤醒（鼠标 45 / 键盘 5 / 触摸板 1），**没有一段走到 `Unknown`**；而修复前的失效会话是 `ActivityLevel 4` + `Duration 0` + `ExitReason Unknown` + `ExitRemainingCapacity 0`，且**完全没有 blocker 相位数据**（会话压根没关闭）。**不是「没碰上」，是「下不去」。**
 >
-> **累计暴露量（2026-10-30 10:30 统计）**：干预后共 **51 次**进入连接待机、**51 次**正常退出（`Kernel-Power 506/507` 一一配对，无一缺失），累计待机 **2199 分钟 = 36 小时 39 分**——这 40 小时 55 分里**有 89.6% 的时间机器处在待机状态**，不是「只在有人用的时候才没崩」。其中 **≥20 分钟的 13 段、≥60 分钟的 3 段，全部正常退出**。本次开机（10-29 09:37:29 起）已 **24 小时 52 分**，43 段待机、22 小时 08 分，同样零异常。
+> **累计暴露量（2026-11-02 11:04 统计）**：干预后共 **81 次**进入连接待机、**81 次**正常退出（`Kernel-Power 506/507` 一一配对，**无一缺失、无一异常**），累计待机 **2551 分钟 = 42 小时 31 分**。其中 **≥20 分钟的 19 段、≥60 分钟的 4 段，全部正常退出**。本次开机（10-29 09:37:29 起）**97 小时 26 分未重启**，期间只有两次主动重启（10-28 改 BIOS、10-29 恢复 HVCI），之后一次也没再动过机器。
 >
-> **和发作期比密度，比和日历比天数更有说服力**：10-28 后半段四次崩溃的间隔是 **63 / 86 / 37 分钟**（平均 62 分钟），而且趋势是**越来越密、没有收敛迹象**。按这个密度，40 小时 55 分 ≈ **40 个「预期崩溃窗口」**，实际发生 0 次。
+> 注意这 113 小时是**两种使用形态都覆盖了**：前 40 小时是整夜连续待机（89.6% 时间在待机），后 3 天是正常白天使用（待机占比降到 37.5%）——**不是同一种场景重复四天**。
 >
-> **⚠️ 读数有坑，先说清楚**：今天看 `Kernel-Power 41` 总数是 **20**，比 10-29 记的 **21** 还少一个。**这不是好转**——`System` 日志是 `Circular` 且已满（20 MB / 27 247 条），最旧的那条 41 已被新事件挤出（现存最早 `07-09 11:35:37`，原来是 `07-08`）。判定口径永远是**「最近一次异常断电」的时间戳**：它仍停在 **`2026-10-28 17:17:46`**，一次都没有前进。**任何按「总数」或「近 30 天次数」做的比较都会被这个坑骗。**
+> **和发作期比密度，比和日历比天数更有说服力**：10-28 后半段四次崩溃的间隔是 **63 / 86 / 37 分钟**（平均 62 分钟），而且趋势是**越来越密、没有收敛迹象**，干预就落在最后一次崩溃的 18 分钟之后。按平均密度，113 小时 ≈ **110 个「预期崩溃窗口」**；即便取最宽松的 86 分钟一次，也有 **79 个**。实际发生 **0 次**——在泊松假设下这个概率低于 10⁻³⁴，已经不属于「运气」。
+>
+> **⚠️ 读数有坑，先说清楚**：`Kernel-Power 41` 总数现在是 **20**，比 10-29 记的 **21** 还**少**一个。**这不是好转**——`System` 日志是 `Circular` 且已满（20 MB / 27 247 条），最旧的那条 41 已被新事件挤出（现存最早 `07-09 11:35:37`，原来是 `07-08`）。判定口径永远是**「最近一次异常断电」的时间戳**：它仍停在 **`2026-10-28 17:17:46`**，五天了**一次都没有前进**。任何按「总数」或「近 30 天次数」做的比较都会被这个坑骗。
 
 > **HVCI（内存完整性）已于 2026-10-29 11:18 恢复开启** —— `SecurityServicesRunning` 回到 **`2,3,4`**、`Enabled = 1`。它在 10-28 已被实测证伪（关着也 31 分钟就崩），不是病因，所以不该长期关着。恢复后的 24 小时里 `Kernel-Power 41` 从未前进过（最近一次仍是 `2026-10-28 17:17:46`），43 段待机全部正常退出——**HVCI 带不回任何东西**。
 >
@@ -35,15 +38,21 @@
 >
 > **虚拟化从头到尾没有被关过**（10-29 14:27 复核）：`HypervisorPresent = True`、VBS = `2`、`EnableVBS = 1`、`hypervisorlaunchtype` 仍是默认 `auto`、`WasEnabledBy = 1`（Windows 默认开启）。本机也**从未安装 WSL 发行版或 Hyper-V**（`Microsoft-Hyper-V-All` 全套未安装，`VirtualMachinePlatform` 已启用但无发行版）。也就是说：**这个修复没有牺牲任何虚拟化能力**，WSL2 与 Hyper-V 随时可用，与故障无关。
 
-> **截至 2026-10-30 10:30 的进展**：干预后连续 **40 小时 55 分**零复现（`Kernel-Power 41` / `6008` / `1001` 本次开机以来全为 0，最近一次异常断电仍是 `2026-10-28 17:17:46`），含 **51 次**正常待机进出、累计 **36 小时 39 分**待机时长。HVCI 与 ASPM 已全部还原出厂值，**Windows 侧偏离项清零**。
+> **截至 2026-11-02 11:04 的进展**：干预后连续 **113 小时 29 分**零复现（`Kernel-Power 41` / `6008` / `1001` 五天来全为 **0**，最近一次异常断电仍是 `2026-10-28 17:17:46`），含 **81 次**正常待机进出、累计 **42 小时 31 分**待机时长、**97 小时 26 分**不重启。HVCI 与 ASPM 已全部还原出厂值，**Windows 侧偏离项清零**，机器上唯一非出厂设置就是 BIOS 里那一条。
 >
-> **现在能说到什么程度**：**这次干预有效，已经可以说定了**——它在发作期最陡的那一段把崩溃密度切断，扛住了 51 次待机、36.6 小时实际待机（含 12h / 14h 各一整段），并且 sleepstudy 显示干预后再没有任何一段会话下到过 `ActivityLevel 4`。**剩下唯一没凑齐的只有「次数」**：历史干净期是 **443 次**待机（`08-27 → 09-22`，16 个在用日），当前 **51 次 ≈ 11.5%**。按每天约 40 段的节奏，再 3～4 天到 200 次。
+> **现在能说到什么程度：故障已经消失，本轮排查可以结案。** 三条互相独立的证据同时成立——
+>
+> ① **密度**：发作期平均 62 分钟一次、且越来越密，干预后 113 小时里 0 次（≈110 个窗口）。
+> ② **机理**：sleepstudy 里唯一的失效特征 `ActivityLevel = 4`，在 179 段历史会话中出现 18 次，**最后一次就是第 21 次崩溃本身，干预后 0 次**——路径被切断，不是运气。
+> ③ **使用形态**：整夜连续待机与日常白天使用都跑过，不是单一场景的重复。
+>
+> **唯一诚实的保留**：这个故障历史上呈「发作期」分布，所以理论上不能 100% 排除「现在恰好落在干净期」。但 10-28 那天正处在最陡的发作期（间隔 63→86→37 分钟一路收紧），干预就落在最后一次崩溃后 18 分钟，此后戛然而止——**发作期自己不会这样停**。剩下这点不确定性，只能靠更长时间来消化，不影响结论。
 >
 > **「接电源还是用电池」不是变量，这条已经查清**（10-29 19:15 复核事件日志）：21 次里**至少有 2 次是电池供电下崩的**（#10 `08-26 10:13:03`、#11 `08-26 11:44:52`——08-25 20:56 拔电、08-26 11:44 才插回，机器全程在跑）；反向也有：`08-27 18:30 → 08-28 09:40` 约 **15 小时纯电池运行**落在 16 天干净期内、零崩溃。**两个方向都有样本**，所以不需要专门去测电池场景。
 >
-> **判据**：累计待机次数达到 **200+**（当前 **51 / 200**），且 ≥20 分钟的深度空闲段全部正常退出（目前 **13 段**，全对）。天数只是代理，暴露量才是本体。
+> **关于判据（已修正，见 P45）**：早先写过「累计待机达到 200+ 次」，那个数字是拍脑袋定的，**而且逻辑上站不住**——历史干净期本身是 443 次待机，可它照样以崩溃收场。**「追平历史最好纪录」不能当作「修好了」的判据**，因为发生过一次最坏结果之后，这个门槛就被自己的历史证伪了。真正能判定的只有「崩溃密度对照」+「机理证据」，两者本页都已满足。
 >
-> ***Latest (2026-10-30 10:30): 40 h 55 min and 51 standby cycles with zero recurrences after round 10.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then: **51 standby cycles, 36 h 39 min actually spent in connected standby (89.6 % of the window), longest single session 14 h 25 min** — versus a pre-fix failure window of ~20 minutes. The sleepstudy report shows `ActivityLevel 4` appearing **18 times in 179 sessions, the last one being the 21st crash itself — and zero times after the fix**. **Not declared "fixed" only because of exposure count**: the machine once ran 443 standby cycles without a freeze; we are at 51.*
+> ***Verdict (2026-11-02 11:04): the freeze is gone.** The BIOS switch `Extended Idle Power States` was set to `Disable` (build `X72 01.05.04`) at 2026-10-28 17:35:27 — the only switch that directly caps package C-state depth, which is exactly what the sole invariant `ActivityLevel 4` points to. Since then: **113 h 29 min uptime, 81 standby cycles (81/81 clean, none missing), 42 h 31 min actually spent in standby, longest single session 14 h 25 min, zero `Kernel-Power 41`** — against a pre-fix failure cadence of one freeze every 62 minutes at its worst. The sleepstudy report shows `ActivityLevel 4` appearing **18 times in 179 sessions, the last one being the 21st crash itself — and zero times after the fix**. Under a Poisson assumption the observed silence is < 10⁻³⁴ likely by chance. **Caveat**: this bug historically came in clusters, so "we happen to be in a clean stretch" can never be ruled out with certainty — but a cluster does not stop on a dime 18 minutes after an intervention.*
 
 > ### ⚠️ 干预之前的状态（2026-10-28 17:17）：21 次，没有找到有效解
 >
@@ -53,9 +62,9 @@
 > `ActivityLevel 0` 那段跑 1231 秒正常结束，`ActivityLevel 4` 那段跑 1885 秒后冻死（亮屏）；1 小时 26 分钟后再崩一次，这次是从**待机**（`Type 1`、`CS = true`）进去的；又过 36 分钟第三次，**黑屏状态下按键盘，整机自己复位**（既没蓝屏也没长按电源键）。
 > 三次的 `Type`、`Duration`、是否待机、连「怎么死的」全都不同，**只有 `ActivityLevel 4` 没变**——失效瞬间连电池读数都归了零。
 >
-> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 44 条踩坑记录**——帮你少走这四个月的弯路。
+> **本仓库现在的价值不是「修复方法」，而是完整的排除过程、9 个数据源的能力边界，和 45 条踩坑记录**——帮你少走这四个月的弯路。
 >
-> ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 44 documented pitfalls**.*
+> ***No working fix after 21 occurrences.** Three interventions have been disproved: the latest BIOS, PCIe ASPM off (verified `0x0/0x0`), and HVCI off (verified `Enabled = 0`). Occurrences 19–21 did leave one thing the previous 18 never did — a complete pre-crash scene. On the same machine on the same day, three very different entry points: an `ActivityLevel 0` session ran 1231 s and ended normally, an `ActivityLevel 4` session ran 1885 s and froze with the screen on; 1 h 26 min later a second one arrived from **connected standby** (`Type 1`, `CS = true`); 36 min after that a third one **reset the machine by itself when a key was pressed on a black screen** — no BSOD, no power-button press. Type, duration, standby state and even the failure shape all differed; **only `ActivityLevel 4` stayed constant**. At the moment of failure the battery reading had dropped to zero. What this repo offers now is the **elimination process, the capability limits of 9 data sources, and 45 documented pitfalls**.*
 
 > **关于「死亡睡眠」这个代号 / On the name.** 我们一开始把这个故障叫作 **Dead Sleep（死亡睡眠）**，查到最后发现**叫错了**——它跟睡眠没有因果关系。名字留在这里只当个纪念。  
 > *We called this bug "dead sleep" at first. That turned out to be a misdiagnosis — the freeze was never caused by sleep. The name is kept here as a memento only.*
@@ -68,7 +77,7 @@
 >
 > Working hypothesis: the freeze happens inside the **CPU idle-state transition**, managed by the **PEP (Micro Power Engine Plugin, 11 idle states)** and requested through the hypervisor. The kernel stack from the HP community thread tops out at `intelppm!HvRequestIdle` — `Hv` meaning **hypervisor**. PCIe ASPM was the leading suspect and **has been tested and disproved on this machine**. This is not a "sleep death" — it is an **"idle death"**.
 >
-> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 44 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
+> The docs below are written in Chinese, but every command is copy-paste ready. Start with **`docs/troubleshooting-log.md`** (the full investigation log — ten rounds of hypotheses, each one and what disproved it, plus 45 pitfalls). The scripts are still useful as **diagnostic tools** and for the settings they check — just don't expect them to fix anything.
 >
 > **Search terms**: `HP ProBook 4 G1i 14 random freeze` · `HP laptop freezes when idle` · `Kernel-Power 41` · `BugcheckCode 0` · `no BSOD no dump` · `Modern Standby freeze` · `S0ix hang` · `ASPM` · `PCIe Link State Power Management` · `L1.2` · `powercfg sleepstudy` · `intelppm!HvRequestIdle` · `PepIdleExecute` · `Windows 11 25H2 26200`
 
@@ -218,8 +227,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\fix-idle-hang.ps1 revert   # 
 | 1 | 关闭 PCIe ASPM / *Disable PCIe ASPM* | ❌ **已证伪** — 2026-10-28，`0x0/0x0` 生效 4h04m 后仍崩；**已于 10-29 14:35 恢复默认 `0x2`**<br />*Disproved — froze 4 h 4 min after verifying `0x0/0x0`; **restored to default `0x2` on 10-29 14:35*** |
 | 2 | 关闭内存完整性 HVCI / *Disable Memory Integrity (HVCI)* | ❌ **已证伪** — 14:22 关闭重启，`Enabled = 0` 回读确认，**31 分钟后仍崩（第 19 次）**；**已于 10-29 11:18 恢复开启**（`2,3,4`）<br />*Disproved — froze again 31 min later; **restored on 10-29 11:18** since it was never the cause* |
 | 3 | 摘掉 hypervisor：**VBS 注册表 + `bcdedit` 两个开关都要关**<br />*Remove the hypervisor: turn off **both** the VBS registry switch and `bcdedit`* | ✅ **不需要了** — 第 10 轮生效后，机器是在 **hypervisor 全程运行**（`HypervisorPresent = True`、VBS = 2）的前提下度过 12 小时连续待机的，说明触发点不在这一层<br />*No longer needed — the 12-hour clean standby happened **with the hypervisor running**, so the trigger is below it* |
-| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 🟢 **当前步骤 — 20h52m 零复现，含 12h03m 连续待机**：**2026-10-28 17:35:27 已在 BIOS 中设为 `Disable` 并重启**；唯一直接限制 package C-state 深度、且在生效后改变了故障表现的措施，不动虚拟化，代价是续航<br />*Current — 20 h 52 min clean incl. a 12 h standby; set in BIOS 2026-10-28 17:35:27; caps package C-state depth, costs battery life, leaves virtualisation alone* |
-| 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19～21 次现场）/ *Evidence package ready* |
+| 4 | BIOS `Extended Idle Power States` = `Disable`<br />*or System Control → High Performance* | 🟢 **已生效 — 结论**：**2026-10-28 17:35:27 设为 `Disable` 并重启**，此后 **113 小时 29 分 / 81 次待机 / 42 小时 31 分实际待机零复现**，故障消失。唯一直接限制 package C-state 深度、且在生效后改变了故障表现的措施；不动虚拟化，代价是续航<br />*Solved — 113 h / 81 standby cycles / 42.5 h in standby, zero freezes; set in BIOS 2026-10-28 17:35:27; caps package C-state depth, costs battery life, leaves virtualisation alone* |
+| 5 | 带证据报修 / *Warranty claim* | 材料已备好（含第 19～21 次现场）。**若第 4 步持续有效则无需报修**；如日后复发，材料可直接使用 / *Evidence package ready — no claim needed if step 4 keeps holding* |
 
 **控制变量账本：这台机器现在还有哪些设置偏离出厂？ / What is still off-default?**
 
@@ -324,7 +333,7 @@ HP 员工仅定性为 "power management or driver interaction during idle-state 
 | `scripts/fix-idle-hang.ps1` | 检查/设置 ASPM 与快速启动，带备份和回滚（`status` / `apply` / `revert`）。**作为诊断工具仍有价值，别指望它治病**<br>*Inspects/sets ASPM + fast startup, with backup and rollback. **Useful as a diagnostic; don't expect a cure*** |
 | `scripts/disable-hypervisor.ps1` | 摘掉 hypervisor：**同时**关 VBS 注册表开关和 `bcdedit hypervisorlaunchtype`（`status` / `apply` / `revert`），带虚拟化依赖检查和冻结基线输出。**⚠️ 现已确认无必要**（见处置表第 3 步）：hypervisor 全程运行并不妨碍修复生效，`apply` 在本机从未执行过，保留它只为记录排查路径<br>*Removes the hypervisor by disabling **both** the VBS registry switch and `hypervisorlaunchtype`, with virtualisation-dependency checks and a freeze baseline* |
 | `scripts/power-mode.ps1` | 电源模式切换（`hibernate` 档可作兜底；`remote` 档已被证伪，见文档 P20）<br>*Power plan switcher (`hibernate` = fallback; `remote` was disproven, see P20)* |
-| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、44 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 44 pitfalls |
+| `docs/troubleshooting-log.md`           | **核心文档**：十轮结论演进、每轮被哪条证据推翻、9 个数据源的能力边界、45 条踩坑<br />**Core doc** — ten rounds of hypotheses and what disproved each, capability limits of 9 data sources, 45 pitfalls |
 | `docs/warranty-claim.md`                | 可直接套用的报修模板（含 21 次断电全量表、排除项、诉求表述）<br />*Warranty claim template (full 19-event table, ruled-out causes, requested actions)*                                            |
 | `samples/sleepstudy-report.sample.html` | 脱敏后的真实 `powercfg /sleepstudy` 报告，用来看清数据结构长什么样<br />*A real, redacted `powercfg /sleepstudy` report — see what the data actually looks like*                           |
 | `private/`                              | 未脱敏原始取证材料的存放位置，**不进版本控制**（见 `private/README.md`）<br />*Home for raw, unredacted evidence — **git-ignored** (see `private/README.md`)*                                 |
